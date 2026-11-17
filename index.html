@@ -200,11 +200,14 @@ button {
 <aside class="sidebar">
 <h2>🎧 salimvearkadaşları</h2>
 <p>ÖZEL SUNUCUMUZ</p>
-<div class="channel"># Genel sohbet</div>
-<div class="channel">🔊 Sesli oda</div>
+
+<div class="channel">🎙️ Sesli oda</div>
 <hr>
-<p>Arkadaşlar</p>
-<p class="status">● Çevrimiçi</p>
+<p><strong>Odadaki kişiler</strong></p>
+<div id="sidebar-voice-users">
+  <p class="status">Henüz kimse katılmadı.</p>
+</div>
+
 </aside>
 <main class="main">
 <div class="top">
@@ -328,6 +331,15 @@ async function loadVoiceMembers() {
 
   const container = document.getElementById("voice-users");
   container.replaceChildren();
+const sidebarList = document.getElementById("sidebar-voice-users");
+
+if (sidebarList) {
+  sidebarList.replaceChildren();
+}
+  
+if (sidebarList && (!data || data.length === 0)) {
+  sidebarList.textContent = "Henüz kimse katılmadı.";
+}
 
   if (!data.length) {
     container.textContent = "Şu anda sesli odada kimse yok.";
@@ -349,6 +361,14 @@ name.textContent = member.username;
 
     item.append(avatar, name);
     container.appendChild(item);
+    const sidebar = document.getElementById("sidebar-voice-users");
+
+if (sidebar) {
+  const sidebarItem = document.createElement("div");
+  sidebarItem.className = "channel";
+  sidebarItem.textContent = "🎧 " + member.username;
+  sidebar.appendChild(sidebarItem);
+}
   });
 }
 // Sesli odadaki kullanıcıları canlı takip et
