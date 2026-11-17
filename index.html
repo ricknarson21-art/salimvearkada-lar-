@@ -151,10 +151,8 @@ input{
 <div class="card">
 <h2>🔊 Sesli sohbet</h2>
 <p>Arkadaşlarınla buluşma noktan!</p>
-<div class="users">
-<div class="user"><div class="avatar">😎</div>Salim</div>
-<div class="user"><div class="avatar">🎮</div>Arkadaş 2</div>
-<div class="user"><div class="avatar">🎧</div>Arkadaş 3</div>
+<div class="users" id="voice-users">
+  <p id="voice-empty">Şu anda sesli odada kimse yok.</p>
 </div>
 <button onclick="join()">Odaya katıl</button>
 <button onclick="mute()" id="mic">🎙 Mikrofonu kapat</button>
@@ -173,13 +171,75 @@ input{
 </div>
 <script>
 let stream=null,muted=false;
-async function join(){
-try{
-stream=await navigator.mediaDevices.getUserMedia({audio:true});
-document.getElementById('status').textContent='Mikrofon açıldı. Şu an bu tarayıcıda hazır.';
-}catch(e){
-document.getElementById('status').textContent='Mikrofon izni verilmedi.';
+async function join() {
+  const status = document.getElementById("status");
+
+  try {
+    const { data: authData, error: authError } =
+      await db.auth.getUser();
+
+    if (authError) throw authError;
+    if (!authData.user) throw new Error("Önce giriş yapmalısın.");
+
+    const user = authData.user;
+
+    const { data: profile, error: profileError } = await db
+      .from("profiles")
+      .select("username")
+      .eq("user_id", user.id)
+      .single();
+
+    if (profileError) throw profileError;
+
+    const { error } = await db.from("voice_members").upsert({
+      user_id: user.id,
+      username: profile.username,
+      joined_at: new Date().toISOString()
+    });
+
+    if (error) throw error;
+
+    status.textContent = "Sesli odaya katıldın!";
+    await loadVoiceMembers();
+
+  } catch (error) {
+    status.textContent = "Hata: " + error.message;
+  }
 }
+
+async function loadVoiceMembers() {
+  const { data, error } = await db
+    .from("voice_members")
+    .select("username")
+    .order("joined_at");
+
+  if (error) {
+    console.error(error);
+    return;
+  }
+
+  const container = document.getElementById("voice-users");
+  container.replaceChildren();
+
+  if (!data.length) {
+    container.textContent = "Şu anda sesli odada kimse yok.";
+    return;
+  }
+
+  data.forEach(member => {
+    const item = document.createElement("div");
+    item.className = "user";
+
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = "🎧";
+
+    const name = document.createElement("div");
+    name.textContent = member.username;
+
+    item.append(avatar, name);
+    container.appendChild(item);
+  });
 }
 function mute(){
 if(!stream)return;
