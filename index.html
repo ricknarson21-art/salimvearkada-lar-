@@ -450,7 +450,15 @@ db.channel("messages-live")
     },
     () => loadMessages()
   )
-  .subscribe();
+
+.subscribe((status, error) => {
+  console.log("Mesaj Realtime durumu:", status);
+
+  if (error) {
+    console.error("Realtime hatası:", error);
+  }
+});
+
 
 loadMessages();
 
