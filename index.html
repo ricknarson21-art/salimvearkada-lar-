@@ -156,21 +156,73 @@ box.scrollTop=box.scrollHeight;
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <script>
-function guestLogin() {
+const SUPABASE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co";
+const SUPABASE_KEY = "BURAYA_PUBLISHABLE_KEY_YAPISTIR";
+
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+async function guestLogin() {
   const name = document.getElementById("guest-name").value.trim();
 
-  if (name.length < 2) {
-    alert("En az 2 karakterli bir kullanıcı adı yaz!");
+  if (name.length < 2 || name.length > 20) {
+    alert("Kullanıcı adı 2-20 karakter olmalı!");
     return;
   }
 
-  localStorage.setItem("salim_guest_name", name);
-  document.getElementById("guest-login").style.display = "none";
+  const button = document.querySelector("#guest-login button");
+  button.disabled = true;
+  button.textContent = "Giriş yapılıyor...";
+
+  try {
+    const { data: sessionData, error: sessionError } =
+      await db.auth.getSession();
+
+    if (sessionError) throw sessionError;
+
+    let user = sessionData.session?.user;
+
+    if (!user) {
+      const { data, error } = await db.auth.signInAnonymously();
+      if (error) throw error;
+      user = data.user;
+    }
+
+    const { error } = await db.from("profiles").upsert(
+      { user_id: user.id, username: name },
+      { onConflict: "user_id" }
+    );
+
+    if (error) throw error;
+
+    localStorage.setItem("salim_guest_name", name);
+    document.getElementById("guest-login").style.display = "none";
+
+    alert("Hoş geldin, " + name + "!");
+  } catch (error) {
+    console.error(error);
+    alert("Giriş hatası: " + error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Misafir olarak giriş yap";
+  }
 }
 
-window.addEventListener("DOMContentLoaded", function() {
-  if (localStorage.getItem("salim_guest_name")) {
+window.addEventListener("DOMContentLoaded", async function () {
+  const { data, error } = await db.auth.getSession();
+
+  if (error || !data.session) return;
+
+  const { data: profile } = await db
+    .from("profiles")
+    .select("username")
+    .eq("user_id", data.session.user.id)
+    .maybeSingle();
+
+  if (profile) {
+    localStorage.setItem("salim_guest_name", profile.username);
     document.getElementById("guest-login").style.display = "none";
   }
 });
