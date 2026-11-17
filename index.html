@@ -1,0 +1,101 @@
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>salimvearkadaşları</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#17151f;color:white;font-family:Arial,sans-serif}
+.app{display:flex;height:100vh}
+.sidebar{width:250px;background:#211e2d;padding:22px}
+h2{color:#a995ff}
+.channel{padding:13px;margin:8px 0;background:#302b40;border-radius:9px}
+.main{flex:1;padding:35px;display:flex;flex-direction:column}
+.top{display:flex;justify-content:space-between;align-items:center}
+.card{background:#242131;border-radius:18px;padding:25px;margin-top:25px}
+.users{display:flex;gap:15px;flex-wrap:wrap;margin:25px 0}
+.user{background:#39334c;padding:20px;border-radius:15px;text-align:center;min-width:100px}
+.avatar{font-size:32px}
+button{border:0;border-radius:10px;padding:13px 19px;color:white;background:#7961e9;cursor:pointer;font-weight:bold;margin:5px}
+button:hover{opacity:.8}
+.red{background:#dc4961}
+#messages{height:200px;overflow:auto;background:#191722;padding:15px;border-radius:10px}
+input{padding:13px;border:0;border-radius:9px;background:#393447;color:white;min-width:0}
+.chatrow{display:flex;gap:8px;margin-top:12px}
+.chatrow input{flex:1}
+.status{color:#55d99b}
+@media(max-width:650px){.sidebar{width:125px;padding:10px}.main{padding:15px}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="sidebar">
+<h2>🎧 salimvearkadaşları</h2>
+<p>ÖZEL SUNUCUMUZ</p>
+<div class="channel"># Genel sohbet</div>
+<div class="channel">🔊 Sesli oda</div>
+<hr>
+<p>Arkadaşlar</p>
+<p class="status">● Çevrimiçi</p>
+</aside>
+<main class="main">
+<div class="top">
+<h1>Arkadaş odası</h1>
+<span class="status">● Sistem hazır</span>
+</div>
+<div class="card">
+<h2>🔊 Sesli sohbet</h2>
+<p>Arkadaşlarınla buluşma noktan!</p>
+<div class="users">
+<div class="user"><div class="avatar">😎</div>Salim</div>
+<div class="user"><div class="avatar">🎮</div>Arkadaş 2</div>
+<div class="user"><div class="avatar">🎧</div>Arkadaş 3</div>
+</div>
+<button onclick="join()">Odaya katıl</button>
+<button onclick="mute()" id="mic">🎙 Mikrofonu kapat</button>
+<button class="red" onclick="leave()">Odadan ayrıl</button>
+<p id="status">Henüz sesli odaya katılmadın.</p>
+</div>
+<div class="card">
+<h2>💬 Genel sohbet</h2>
+<div id="messages">Sohbete hoş geldin!</div>
+<div class="chatrow">
+<input id="msg" placeholder="Mesajını yaz...">
+<button onclick="send()">Gönder</button>
+</div>
+</div>
+</main>
+</div>
+<script>
+let stream=null,muted=false;
+async function join(){
+try{
+stream=await navigator.mediaDevices.getUserMedia({audio:true});
+document.getElementById('status').textContent='Mikrofon açıldı. Şu an bu tarayıcıda hazır.';
+}catch(e){
+document.getElementById('status').textContent='Mikrofon izni verilmedi.';
+}
+}
+function mute(){
+if(!stream)return;
+muted=!muted;
+stream.getAudioTracks().forEach(t=>t.enabled=!muted);
+document.getElementById('mic').textContent=muted?'🎙 Mikrofonu aç':'🎙 Mikrofonu kapat';
+}
+function leave(){
+if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+document.getElementById('status').textContent='Odadan ayrıldın.';
+}
+function send(){
+let input=document.getElementById('msg');
+if(!input.value.trim())return;
+let box=document.getElementById('messages');
+box.innerHTML+='<p><b>Sen:</b> '+input.value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))+'</p>';
+input.value='';
+box.scrollTop=box.scrollHeight;
+}
+</script>
+</body>
+</html>
