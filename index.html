@@ -321,59 +321,37 @@ await livekitRoom.localParticipant.setMicrophoneEnabled(true);
   }
 }
 
+
 async function loadVoiceMembers() {
-  const { data, error } = await db
-    .from("voice_members")
-    .select("username")
-    .order("joined_at");
+    const { data, error } = await db
+        .from("voice_members")
+        .select("username")
+        .order("joined_at");
 
-  if (error) {
-    console.error(error);
-    return;
-  }
+    if (error) {
+        console.error(error);
+        return;
+    }
 
-  const container = document.getElementById("voice-users");
-  container.replaceChildren();
-const sidebarList = document.getElementById("sidebar-voice-users");
+    const sidebarList = document.getElementById("sidebar-voice-users");
 
-if (sidebarList) {
-  sidebarList.replaceChildren();
+    if (!sidebarList) return;
+
+    sidebarList.replaceChildren();
+
+    if (!data || data.length === 0) {
+        sidebarList.textContent = "Henüz kimse katılmadı.";
+        return;
+    }
+
+    data.forEach(member => {
+        const item = document.createElement("div");
+        item.className = "channel";
+        item.textContent = "🎧 " + member.username;
+        sidebarList.appendChild(item);
+    });
 }
-  
-if (sidebarList && (!data || data.length === 0)) {
-  sidebarList.textContent = "Henüz kimse katılmadı.";
-}
 
-  if (!data.length) {
-    container.textContent = "Şu anda sesli odada kimse yok.";
-    return;
-  }
-
-  data.forEach(member => {
-    const item = document.createElement("div");
-    item.className = "user";
-
-    const avatar = document.createElement("div");
-    avatar.className = "avatar";
-    avatar.textContent = "🎧";
-
-
-const name = document.createElement("div");
-name.className = "name";
-name.textContent = member.username;
-
-    item.append(avatar, name);
-    container.appendChild(item);
-    const sidebar = document.getElementById("sidebar-voice-users");
-
-if (sidebar) {
-  const sidebarItem = document.createElement("div");
-  sidebarItem.className = "channel";
-  sidebarItem.textContent = "🎧 " + member.username;
-  sidebar.appendChild(sidebarItem);
-}
-  });
-}
 // Sesli odadaki kullanıcıları canlı takip et
 const voiceChannel = db
   .channel("voice-room-live")
