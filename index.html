@@ -241,6 +241,24 @@ async function loadVoiceMembers() {
     container.appendChild(item);
   });
 }
+// Sesli odadaki kullanıcıları canlı takip et
+const voiceChannel = db
+  .channel("voice-room-live")
+  .on(
+    "postgres_changes",
+    {
+      event: "*",
+      schema: "public",
+      table: "voice_members"
+    },
+    () => {
+      loadVoiceMembers();
+    }
+  )
+  .subscribe();
+
+// Sayfa açıldığında odadaki kişileri göster
+loadVoiceMembers();  
 function mute(){
 if(!stream)return;
 muted=!muted;
