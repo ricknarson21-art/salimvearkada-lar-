@@ -131,6 +131,9 @@ input{
   .main{padding:15px}
 }
 </style>
+
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+  
 </head>
 <body>
 <div class="app">
@@ -171,6 +174,7 @@ input{
 </div>
 <script>
 let stream=null,muted=false;
+let livekitRoom = null;  
 async function join() {
   const status = document.getElementById("status");
 
@@ -198,6 +202,50 @@ async function join() {
     });
 
     if (error) throw error;
+
+const { data: sessionData, error: sessionError } =
+  await db.auth.getSession();
+
+if (sessionError) throw sessionError;
+
+const accessToken = sessionData.session?.access_token;
+if (!accessToken) throw new Error("Oturum bulunamadı.");
+
+const response = await fetch("/api/livekit-token", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: "Bearer " + accessToken
+  }
+});
+
+const result = await response.json();
+
+if (!response.ok) {
+  throw new Error(result.error || "Ses bağlantısı kurulamadı.");
+}
+
+livekitRoom = new LivekitClient.Room();
+
+livekitRoom.on(
+  LivekitClient.RoomEvent.TrackSubscribed,
+  (track) => {
+    if (track.kind === "audio") {
+      const audio = track.attach();
+      document.body.appendChild(audio);
+    }
+  }
+);
+
+livekitRoom.on(
+  LivekitClient.RoomEvent.TrackUnsubscribed,
+  (track) => {
+    track.detach().forEach((element) => element.remove());
+  }
+);
+
+await livekitRoom.connect(result.serverUrl, result.token);
+await livekitRoom.localParticipant.setMicrophoneEnabled(true);
 
     status.textContent = "Sesli odaya katıldın!";
     await loadVoiceMembers();
@@ -259,12 +307,27 @@ const voiceChannel = db
 
 // Sayfa açıldığında odadaki kişileri göster
 loadVoiceMembers();  
-function mute(){
-if(!stream)return;
-muted=!muted;
-stream.getAudioTracks().forEach(t=>t.enabled=!muted);
-document.getElementById('mic').textContent=muted?'🎙 Mikrofonu aç':'🎙 Mikrofonu kapat';
+
+async function mute() {
+  if (!livekitRoom) {
+    alert("Önce sesli odaya katılmalısın.");
+    return;
+  }
+
+  try {
+    muted = !muted;
+
+    await livekitRoom.localParticipant.setMicrophoneEnabled(!muted);
+
+    document.getElementById("mic").textContent = muted
+      ? "🎙 Mikrofonu aç"
+      : "🎙 Mikrofonu kapat";
+  } catch (error) {
+    muted = !muted;
+    alert("Mikrofon hatası: " + error.message);
+  }
 }
+
 async function leave() {
   const status = document.getElementById("status");
 
@@ -280,6 +343,14 @@ async function leave() {
       .eq("user_id", data.user.id);
 
     if (error) throw error;
+
+if (livekitRoom) {
+  await livekitRoom.disconnect();
+  livekitRoom = null;
+}
+
+muted = false;
+document.getElementById("mic").textContent = "🎙 Mikrofonu kapat";
 
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
