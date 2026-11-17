@@ -366,14 +366,94 @@ document.getElementById("mic").textContent = "🎙 Mikrofonu kapat";
     status.textContent = "Hata: " + error.message;
   }
 }
-function send(){
-let input=document.getElementById('msg');
-if(!input.value.trim())return;
-let box=document.getElementById('messages');
-box.innerHTML+='<p><b>Sen:</b> '+input.value.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))+'</p>';
-input.value='';
-box.scrollTop=box.scrollHeight;
+
+async function send() {
+  const input = document.getElementById("msg");
+  const content = input.value.trim();
+
+  if (!content) return;
+
+  try {
+    const { data: authData, error: authError } =
+      await db.auth.getUser();
+
+    if (authError) throw authError;
+    if (!authData.user) {
+      throw new Error("Önce giriş yapmalısın.");
+    }
+
+    const { error } = await db
+      .from("messages")
+      .insert({
+        user_id: authData.user.id,
+        content: content
+      });
+
+    if (error) throw error;
+
+    input.value = "";
+    await loadMessages();
+  } catch (error) {
+    alert("Mesaj gönderilemedi: " + error.message);
+  }
 }
+
+async function loadMessages() {
+  const { data, error } = await db
+    .from("messages")
+    .select("id, content, created_at, user_id")
+    .order("created_at", { ascending: true })
+    .limit(100);
+
+  if (error) {
+    console.error("Mesajlar yüklenemedi:", error);
+    return;
+  }
+
+  const box = document.getElementById("messages");
+  box.replaceChildren();
+
+const { data: profiles, error: profilesError } = await db
+  .from("profiles")
+  .select("user_id, username");
+
+if (profilesError) {
+  console.error("Kullanıcı adları yüklenemedi:", profilesError);
+}
+
+const usernames = new Map(
+  (profiles || []).map(profile => [
+    profile.user_id,
+    profile.username
+  ])
+);
+
+  for (const message of data) {
+    const p = document.createElement("p");
+ 
+const username = usernames.get(message.user_id) || "Misafir";
+p.textContent = username + ": " + message.content;
+
+    box.appendChild(p);
+  }
+
+  box.scrollTop = box.scrollHeight;
+}
+
+db.channel("messages-live")
+  .on(
+    "postgres_changes",
+    {
+      event: "INSERT",
+      schema: "public",
+      table: "messages"
+    },
+    () => loadMessages()
+  )
+  .subscribe();
+
+loadMessages();
+
 </script>
   <style>
 /* Sade lacivert ve mavi tema */
