@@ -440,27 +440,9 @@ p.textContent = username + ": " + message.content;
   box.scrollTop = box.scrollHeight;
 }
 
-db.channel("messages-live")
-  .on(
-    "postgres_changes",
-    {
-      event: "INSERT",
-      schema: "public",
-      table: "messages"
-    },
-    () => loadMessages()
-  )
-
-.subscribe((status, error) => {
-  console.log("Mesaj Realtime durumu:", status);
-
-  if (error) {
-    console.error("Realtime hatası:", error);
-  }
-});
 
 
-loadMessages();
+
 
 </script>
   <style>
@@ -599,7 +581,27 @@ const SUPABASE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co";
 const SUPABASE_KEY = "sb_publishable_miyRdM2azWa6gekBkfZ-Cg_V0GKcZw8";
 
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+window.db = db;
+  db.channel("messages-live")
+  .on(
+    "postgres_changes",
+    {
+      event: "INSERT",
+      schema: "public",
+      table: "messages"
+    },
+    
+    () => loadMessages()
+  )
 
+.subscribe((status, error) => {
+  console.log("Mesaj Realtime durumu:", status);
+
+  if (error) {
+    console.error("Realtime hatası:", error);
+  }
+});
+  loadMessages();
 async function guestLogin() {
   const name = document.getElementById("guest-name").value.trim();
 
