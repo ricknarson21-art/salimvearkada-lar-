@@ -7,26 +7,118 @@
 <title>salimvearkadaşları</title>
 <style>
 *{box-sizing:border-box}
-body{margin:0;background:#17151f;color:white;font-family:Arial,sans-serif}
+
+body{
+  margin:0;
+  background:#0b1220;
+  color:#e5edf8;
+  font-family:Arial,sans-serif;
+}
+
 .app{display:flex;height:100vh}
-.sidebar{width:250px;background:#211e2d;padding:22px}
-h2{color:#a995ff}
-.channel{padding:13px;margin:8px 0;background:#302b40;border-radius:9px}
-.main{flex:1;padding:35px;display:flex;flex-direction:column}
-.top{display:flex;justify-content:space-between;align-items:center}
-.card{background:#242131;border-radius:18px;padding:25px;margin-top:25px}
-.users{display:flex;gap:15px;flex-wrap:wrap;margin:25px 0}
-.user{background:#39334c;padding:20px;border-radius:15px;text-align:center;min-width:100px}
-.avatar{font-size:32px}
-button{border:0;border-radius:10px;padding:13px 19px;color:white;background:#7961e9;cursor:pointer;font-weight:bold;margin:5px}
-button:hover{opacity:.8}
-.red{background:#dc4961}
-#messages{height:200px;overflow:auto;background:#191722;padding:15px;border-radius:10px}
-input{padding:13px;border:0;border-radius:9px;background:#393447;color:white;min-width:0}
-.chatrow{display:flex;gap:8px;margin-top:12px}
+
+.sidebar{
+  width:250px;
+  background:#111d30;
+  padding:22px;
+  border-right:1px solid #263852;
+}
+
+h2{color:#60a5fa}
+
+.channel{
+  padding:13px;
+  margin:8px 0;
+  background:#1b2b43;
+  border-radius:9px;
+}
+
+.main{
+  flex:1;
+  padding:35px;
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+  overflow-y:auto;
+}
+
+.top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+.card{
+  background:#152238;
+  border:1px solid #253a57;
+  border-radius:12px;
+  padding:20px;
+  margin-top:18px;
+}
+
+.users{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin:15px 0;
+}
+
+.user{
+  background:#20334f;
+  padding:16px;
+  border-radius:10px;
+  text-align:center;
+  min-width:80px;
+}
+
+.avatar{font-size:28px}
+
+button{
+  border:0;
+  border-radius:8px;
+  padding:11px 16px;
+  color:white;
+  background:#2563eb;
+  cursor:pointer;
+  font-weight:bold;
+  margin:5px;
+}
+
+button:hover{opacity:.85}
+
+.red{background:#dc4659}
+
+#messages{
+  height:280px;
+  overflow-y:auto;
+  background:#0e192b;
+  padding:15px;
+  border-radius:9px;
+}
+
+input{
+  padding:13px;
+  border:1px solid #304866;
+  border-radius:9px;
+  background:#1c2d45;
+  color:white;
+  min-width:0;
+}
+
+.chatrow{
+  display:flex;
+  gap:8px;
+  margin-top:12px;
+}
+
 .chatrow input{flex:1}
-.status{color:#55d99b}
-@media(max-width:650px){.sidebar{width:125px;padding:10px}.main{padding:15px}}
+
+.status{color:#34d399}
+
+@media(max-width:650px){
+  .sidebar{width:125px;padding:10px}
+  .main{padding:15px}
+}
 </style>
 </head>
 <body>
