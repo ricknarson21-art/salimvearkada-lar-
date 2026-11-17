@@ -216,7 +216,10 @@ button {
 </div>
 <div class="card">
 <h2>🔊 Sesli sohbet</h2>
-<p>Arkadaşlarınla buluşma noktan!</p>
+<p>🟢 Çevrimiçi arkadaşlar</p>
+<div id="online-users" class="users">
+  <p>Şu anda çevrimiçi kimse yok.</p>
+</div>
 <div class="users" id="voice-users">
   <p id="voice-empty">Şu anda sesli odada kimse yok.</p>
 </div>
@@ -718,6 +721,7 @@ async function guestLogin() {
     if (error) throw error;
 
     localStorage.setItem("salim_guest_name", name);
+    await startOnlinePresence();
     document.getElementById("guest-login").style.display = "none";
 
     alert("Hoş geldin, " + name + "!");
@@ -743,7 +747,74 @@ window.addEventListener("DOMContentLoaded", async function () {
 
   if (profile) {
     localStorage.setItem("salim_guest_name", profile.username);
+    await startOnlinePresence();
     document.getElementById("guest-login").style.display = "none";
   }
 });
+  
+let onlineChannel = null;
+
+async function startOnlinePresence() {
+  const { data: { user } } = await db.auth.getUser();
+  const username = localStorage.getItem("salim_guest_name");
+
+  if (!user || !username) return;
+
+  if (onlineChannel) {
+    await db.removeChannel(onlineChannel);
+  }
+
+  onlineChannel = db.channel("site-online-presence", {
+    config: {
+      presence: { key: user.id }
+    }
+  });
+
+  function renderOnlineUsers() {
+    const box = document.getElementById("online-users");
+    if (!box) return;
+
+    const state = onlineChannel.presenceState();
+    const people = Object.values(state).flat();
+
+    box.replaceChildren();
+
+    if (people.length === 0) {
+      box.textContent = "Şu anda çevrimiçi kimse yok.";
+      return;
+    }
+
+    const unique = [...new Map(
+      people.map(person => [person.user_id, person])
+    ).values()];
+
+    unique.forEach(person => {
+      const item = document.createElement("div");
+      item.className = "user";
+
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = "👤";
+
+      const name = document.createElement("div");
+      name.className = "name";
+      name.textContent = person.username;
+
+      item.append(avatar, name);
+      box.appendChild(item);
+    });
+  }
+
+  onlineChannel
+    .on("presence", { event: "sync" }, renderOnlineUsers)
+    .subscribe(async status => {
+      if (status === "SUBSCRIBED") {
+        await onlineChannel.track({
+          user_id: user.id,
+          username: username
+        });
+      }
+    });
+}
+
 </script>
