@@ -1,798 +1,413 @@
-
-<!DOCTYPE html>
+<!doctype html>
 <html lang="tr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>salimvearkadaşları</title>
-<style>
-*{box-sizing:border-box}
-
-body{
-  margin:0;
-  background:#0b1220;
-  color:#e5edf8;
-  font-family:Arial,sans-serif;
-}
-
-.app{display:flex;height:100vh}
-
-.sidebar{
-  width:250px;
-  background:#111d30;
-  padding:22px;
-  border-right:1px solid #263852;
-}
-
-h2{color:#60a5fa}
-
-.channel{
-  padding:13px;
-  margin:8px 0;
-  background:#1b2b43;
-  border-radius:9px;
-}
-
-.main{
-  flex:1;
-  padding:35px;
-  display:flex;
-  flex-direction:column;
-  min-width:0;
-  overflow-y:auto;
-}
-
-.top{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-
-.card{
-  background:#152238;
-  border:1px solid #253a57;
-  border-radius:12px;
-  padding:20px;
-  margin-top:18px;
-}
-/* Sesli sohbet alanını küçült */
-.card:first-of-type {
-  padding: 16px;
-}
-
-.card:first-of-type .users {
-  margin: 8px 0;
-}
-
-.card:first-of-type .user {
-  padding: 10px;
-}
-.users{
-  display:flex;
-  gap:10px;
-  flex-wrap:wrap;
-  margin:15px 0;
-}
-
-.user{
-  background:#20334f;
-  padding:16px;
-  border-radius:10px;
-  text-align:center;
-  min-width:80px;
-}
-
-.avatar{font-size:28px}
-
-button{
-  border:0;
-  border-radius:8px;
-  padding:11px 16px;
-  color:white;
-  background:#2563eb;
-  cursor:pointer;
-  font-weight:bold;
-  margin:5px;
-}
-
-button:hover{opacity:.85}
-
-.red{background:#dc4659}
-
-#messages{
-  height:280px;
-  overflow-y:auto;
-  background:#0e192b;
-  padding:15px;
-  border-radius:9px;
-}
-
-input{
-  padding:13px;
-  border:1px solid #304866;
-  border-radius:9px;
-  background:#1c2d45;
-  color:white;
-  min-width:0;
-}
-
-.chatrow{
-  display:flex;
-  gap:8px;
-  margin-top:12px;
-}
-
-.chatrow input{flex:1}
-
-.status{color:#34d399}
-
-@media(max-width:650px){
-  .sidebar{width:125px;padding:10px}
-  .main{padding:15px}
-}
-
-/* Sade arkadaş ve sesli oda tasarımı */
-.main {
-  max-width: 1100px;
-  margin: 0 auto;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.card {
-  border-radius: 16px !important;
-  border: 1px solid #2a3d5b !important;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
-}
-
-.users, #voice-users {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  padding: 12px 0;
-}
-
-#voice-users .user {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  background: #223451;
-  border: 1px solid #304768;
-  border-radius: 30px;
-  padding: 8px 14px;
-}
-
-#voice-users .avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: #3566b5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-}
-
-#voice-users .name {
-  font-weight: 600;
-  font-size: 14px;
-}
-
-button {
-  border-radius: 9px !important;
-  transition: background 0.2s ease;
-}
-
-#messages {
-  border-radius: 12px;
-  padding: 15px;
-  overflow-y: auto;
-}
-  
-</style>
-
-<script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
-  
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>salimvearkadaşları</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+  <style>
+    :root{color-scheme:dark;--bg:#0b1220;--side:#111d30;--panel:#152238;--panel2:#1b2b43;--panel3:#20334f;--line:#263852;--text:#e5edf8;--muted:#9aabc2;--blue:#2563eb;--green:#34d399;--red:#dc4659}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Arial,system-ui,sans-serif}
+    button,input{font:inherit}
+    button{border:0;border-radius:9px;padding:11px 16px;color:#fff;background:var(--blue);font-weight:700;cursor:pointer}
+    button:hover{filter:brightness(1.1)}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .app{display:flex;min-height:100vh}
+    .sidebar{width:250px;flex:0 0 250px;background:var(--side);padding:22px 18px;border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:100vh}
+    .brand h1{font-size:22px;margin:0 0 18px;color:#fff;overflow-wrap:anywhere}
+    .server-label{margin:0 0 12px;color:#c5d3e6}
+    .room-link{padding:13px;background:var(--panel2);border-radius:9px;margin:5px 0 12px}
+    hr{border:0;border-top:1px solid #d6deeb;margin:0 0 17px}
+    .side-heading{font-size:15px;margin:0 0 10px}
+    #sidebar-voice-users{display:flex;flex-direction:column;gap:8px}
+    .sidebar-person{display:flex;align-items:center;gap:9px;padding:10px;background:var(--panel2);border-radius:9px;overflow-wrap:anywhere}
+    .avatar{width:34px;height:34px;flex:0 0 34px;border-radius:50%;background:#3566b5;display:grid;place-items:center;font-weight:bold;color:#fff}
+    .sidebar-person .avatar{width:28px;height:28px;flex-basis:28px;font-size:12px}
+    .empty{color:var(--muted);font-size:13px;padding:8px 2px}
+    .side-bottom{margin-top:auto;padding-top:18px}
+    .me{display:flex;align-items:center;gap:9px;min-width:0}
+    .me-info{min-width:0;flex:1}
+    .me-info strong,.me-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .me-info small{color:var(--muted)}
+    .main{flex:1;min-width:0;padding:32px;display:flex;flex-direction:column;gap:18px;max-width:1250px;margin:0 auto;width:100%}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .top h1{font-size:28px;margin:0}
+    .status-pill{font-size:12px;color:#b9f1d8;background:#1d463b;padding:7px 11px;border-radius:20px;white-space:nowrap}
+    .card{background:var(--panel);border:1px solid #253a57;border-radius:16px;padding:20px;box-shadow:0 6px 20px #0002}
+    .card h2{font-size:21px;margin:0 0 10px;color:#f1f5f9}
+    .online-title{margin:0 0 10px;color:#e5edf8}
+    .online-grid{display:flex;flex-wrap:wrap;gap:12px;min-height:26px;padding:4px 0 8px}
+    .online-person{display:flex;align-items:center;gap:9px;background:var(--panel3);border:1px solid #304768;border-radius:12px;padding:10px 13px;min-width:125px}
+    .online-person .avatar{width:32px;height:32px;flex-basis:32px}
+    .online-name{font-weight:600;overflow-wrap:anywhere}
+    .online-dot{width:9px;height:9px;border-radius:50%;background:var(--green);margin-left:auto;flex:none}
+    .voice-controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    .muted-btn{background:#34445f}
+    .danger{background:var(--red)}
+    .statusline{color:var(--muted);font-size:13px;margin:12px 0 0;min-height:18px}
+    #messages{height:280px;overflow-y:auto;background:#0e192b;padding:15px;border-radius:12px}
+    .message{padding:8px 3px;border-bottom:1px solid #1b2b43;overflow-wrap:anywhere}
+    .message:last-child{border-bottom:0}
+    .message strong{color:#9bbcff;margin-right:8px}
+    .message time{font-size:11px;color:var(--muted)}
+    .chatrow{display:flex;gap:8px;margin-top:12px}
+    .chatrow input,.login-box input{min-width:0;padding:13px;border:1px solid #304866;border-radius:9px;background:#1c2d45;color:#fff;outline:none}
+    .chatrow input{flex:1}
+    .login{position:fixed;inset:0;z-index:100;background:radial-gradient(ellipse at top,#243a5a,#0b1220 65%);display:flex;align-items:center;justify-content:center;padding:20px}
+    .login-box{width:min(380px,100%);background:#152238;border:1px solid #304866;border-radius:18px;padding:30px;text-align:center;box-shadow:0 25px 80px #0008}
+    .login-box h1{margin:8px 0;color:#fff}
+    .login-box p{color:var(--muted)}
+    .login-box input{width:100%;margin:10px 0 12px}
+    .login-box button{width:100%}
+    .login-note{font-size:12px!important}
+    .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#20334f;border:1px solid #456080;padding:10px 15px;border-radius:10px;display:none;z-index:200;max-width:min(90vw,600px)}
+    @media(max-width:700px){.sidebar{width:190px;flex-basis:190px;padding:16px 12px}.main{padding:18px}.top h1{font-size:22px}}
+    @media(max-width:520px){.app{display:block}.sidebar{width:100%;min-height:0;padding:14px}.brand h1{font-size:19px;margin-bottom:10px}.side-bottom{margin-top:15px}.main{padding:14px}.top h1{font-size:20px}.card{padding:15px}.chatrow button{padding:10px}}
+  </style>
 </head>
 <body>
-<div class="app">
-<aside class="sidebar">
-<h2>🎧 salimvearkadaşları</h2>
-<p>ÖZEL SUNUCUMUZ</p>
-
-<div class="channel">🎙️ Sesli oda</div>
-<hr>
-<p><strong>Odadaki kişiler</strong></p>
-<div id="sidebar-voice-users">
-  <p class="status">Henüz kimse katılmadı.</p>
-</div>
-
-</aside>
-<main class="main">
-<div class="top">
-<h1>Arkadaş odası</h1>
-<span class="status">● Sistem hazır</span>
-</div>
-<div class="card">
-<h2>🔊 Sesli sohbet</h2>
-<p>🟢 Çevrimiçi arkadaşlar</p>
-<div id="online-users" class="users">
-  <p>Şu anda çevrimiçi kimse yok.</p>
-</div>
-<div class="users" id="voice-users">
-  <p id="voice-empty">Şu anda sesli odada kimse yok.</p>
-</div>
-<button onclick="join()">Odaya katıl</button>
-<button onclick="mute()" id="mic">🎙 Mikrofonu kapat</button>
-<button class="red" onclick="leave()">Odadan ayrıl</button>
-<p id="status">Henüz sesli odaya katılmadın.</p>
-</div>
-<div class="card">
-<h2>💬 Genel sohbet</h2>
-<div id="messages">Sohbete hoş geldin!</div>
-<div class="chatrow">
-<input id="msg" placeholder="Mesajını yaz...">
-<button onclick="send()">Gönder</button>
-</div>
-</div>
-</main>
-</div>
-<script>
-let stream=null,muted=false;
-let livekitRoom = null;  
-async function join() {
-  const status = document.getElementById("status");
-
-  try {
-    const { data: authData, error: authError } =
-      await db.auth.getUser();
-
-    if (authError) throw authError;
-    if (!authData.user) throw new Error("Önce giriş yapmalısın.");
-
-    const user = authData.user;
-
-    const { data: profile, error: profileError } = await db
-      .from("profiles")
-      .select("username")
-      .eq("user_id", user.id)
-      .single();
-
-    if (profileError) throw profileError;
-
-    const { error } = await db.from("voice_members").upsert({
-      user_id: user.id,
-      username: profile.username,
-      joined_at: new Date().toISOString()
-    });
-
-    if (error) throw error;
-
-const { data: sessionData, error: sessionError } =
-  await db.auth.getSession();
-
-if (sessionError) throw sessionError;
-
-const accessToken = sessionData.session?.access_token;
-if (!accessToken) throw new Error("Oturum bulunamadı.");
-
-const response = await fetch("/api/livekit-token", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: "Bearer " + accessToken
-  }
-});
-
-const result = await response.json();
-
-if (!response.ok) {
-  throw new Error(result.error || "Ses bağlantısı kurulamadı.");
-}
-
-livekitRoom = new LivekitClient.Room();
-
-livekitRoom.on(
-  LivekitClient.RoomEvent.TrackSubscribed,
-  (track) => {
-    if (track.kind === "audio") {
-      const audio = track.attach();
-      document.body.appendChild(audio);
-    }
-  }
-);
-
-livekitRoom.on(
-  LivekitClient.RoomEvent.TrackUnsubscribed,
-  (track) => {
-    track.detach().forEach((element) => element.remove());
-  }
-);
-
-await livekitRoom.connect(result.serverUrl, result.token);
-await livekitRoom.localParticipant.setMicrophoneEnabled(true);
-
-    status.textContent = "Sesli odaya katıldın!";
-    await loadVoiceMembers();
-
-  } catch (error) {
-    status.textContent = "Hata: " + error.message;
-  }
-}
-
-
-async function loadVoiceMembers() {
-    const { data, error } = await db
-        .from("voice_members")
-        .select("username")
-        .order("joined_at");
-
-    if (error) {
-        console.error(error);
-        return;
-    }
-
-    const sidebarList = document.getElementById("sidebar-voice-users");
-
-    if (!sidebarList) return;
-
-    sidebarList.replaceChildren();
-
-    if (!data || data.length === 0) {
-        sidebarList.textContent = "Henüz kimse katılmadı.";
-        return;
-    }
-
-    data.forEach(member => {
-        const item = document.createElement("div");
-        item.className = "channel";
-        item.textContent = "🎧 " + member.username;
-        sidebarList.appendChild(item);
-    });
-}
-
-// Sesli odadaki kullanıcıları canlı takip et
-const voiceChannel = db
-  .channel("voice-room-live")
-  .on(
-    "postgres_changes",
-    {
-      event: "*",
-      schema: "public",
-      table: "voice_members"
-    },
-    () => {
-      loadVoiceMembers();
-    }
-  )
-  .subscribe();
-
-// Sayfa açıldığında odadaki kişileri göster
-loadVoiceMembers();  
-
-async function mute() {
-  if (!livekitRoom) {
-    alert("Önce sesli odaya katılmalısın.");
-    return;
-  }
-
-  try {
-    muted = !muted;
-
-    await livekitRoom.localParticipant.setMicrophoneEnabled(!muted);
-
-    document.getElementById("mic").textContent = muted
-      ? "🎙 Mikrofonu aç"
-      : "🎙 Mikrofonu kapat";
-  } catch (error) {
-    muted = !muted;
-    alert("Mikrofon hatası: " + error.message);
-  }
-}
-
-async function leave() {
-  const status = document.getElementById("status");
-
-  try {
-    const { data, error: authError } = await db.auth.getUser();
-
-    if (authError) throw authError;
-    if (!data.user) throw new Error("Giriş yapılmamış.");
-
-    const { error } = await db
-      .from("voice_members")
-      .delete()
-      .eq("user_id", data.user.id);
-
-    if (error) throw error;
-
-if (livekitRoom) {
-  await livekitRoom.disconnect();
-  livekitRoom = null;
-}
-
-muted = false;
-document.getElementById("mic").textContent = "🎙 Mikrofonu kapat";
-
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      stream = null;
-    }
-
-    muted = false;
-    status.textContent = "Odadan ayrıldın.";
-
-    await loadVoiceMembers();
-
-  } catch (error) {
-    status.textContent = "Hata: " + error.message;
-  }
-}
-
-async function send() {
-  const input = document.getElementById("msg");
-  const content = input.value.trim();
-
-  if (!content) return;
-
-  try {
-    const { data: authData, error: authError } =
-      await db.auth.getUser();
-
-    if (authError) throw authError;
-    if (!authData.user) {
-      throw new Error("Önce giriş yapmalısın.");
-    }
-
-    const { error } = await db
-      .from("messages")
-      .insert({
-        user_id: authData.user.id,
-        content: content
-      });
-
-    if (error) throw error;
-
-    input.value = "";
-    await loadMessages();
-  } catch (error) {
-    alert("Mesaj gönderilemedi: " + error.message);
-  }
-}
-
-async function loadMessages() {
-  const { data, error } = await db
-    .from("messages")
-    .select("id, content, created_at, user_id")
-    .order("created_at", { ascending: true })
-    .limit(100);
-
-  if (error) {
-    console.error("Mesajlar yüklenemedi:", error);
-    return;
-  }
-
-  const box = document.getElementById("messages");
-  box.replaceChildren();
-
-const { data: profiles, error: profilesError } = await db
-  .from("profiles")
-  .select("user_id, username");
-
-if (profilesError) {
-  console.error("Kullanıcı adları yüklenemedi:", profilesError);
-}
-
-const usernames = new Map(
-  (profiles || []).map(profile => [
-    profile.user_id,
-    profile.username
-  ])
-);
-
-  for (const message of data) {
-    const p = document.createElement("p");
- 
-const username = usernames.get(message.user_id) || "Misafir";
-p.textContent = username + ": " + message.content;
-
-    box.appendChild(p);
-  }
-
-  box.scrollTop = box.scrollHeight;
-}
-
-
-
-
-
-</script>
-  <style>
-/* Sade lacivert ve mavi tema */
-:root {
-  color-scheme: dark;
-}
-
-body {
-  background: #0b1120 !important;
-  color: #e2e8f0 !important;
-  font-family: 'Segoe UI', Arial, sans-serif !important;
-}
-
-/* Sol menü */
-aside, nav, .sidebar {
-  background: #111c30 !important;
-  border-color: #243550 !important;
-}
-
-/* Ana bölümler */
-main, .main-content {
-  background: #0b1120 !important;
-}
-
-/* Kartlar */
-.card, .panel, .voice-panel, .chat-panel {
-  background: #162238 !important;
-  border: 1px solid #263956 !important;
-  border-radius: 12px !important;
-  box-shadow: none !important;
-}
-
-/* Başlıklar */
-h1, h2, h3 {
-  color: #f1f5f9 !important;
-}
-
-/* Butonlar */
-button {
-  border-radius: 8px !important;
-  transition: background 0.2s ease;
-}
-
-button:not(.danger):not(.leave) {
-  background: #2563eb;
-  color: white;
-}
-
-button:not(.danger):not(.leave):hover {
-  background: #1d4ed8;
-}
-
-/* Mesaj kutusu */
-input, textarea {
-  background: #1e2d46 !important;
-  color: #f8fafc !important;
-  border: 1px solid #334766 !important;
-  border-radius: 8px !important;
-}
-
-input:focus, textarea:focus {
-  outline: 1px solid #3b82f6;
-}
-
-/* Küçük ekran uyumu */
-@media (max-width: 768px) {
-  .sidebar {
-    width: 180px;
-  }
-}
-</style>
-</body>
-</html>
-
-<!-- MISAFIR GIRIS EKRANI -->
-<style>
-#guest-login {
-  position: fixed;
-  inset: 0;
-  z-index: 99999;
-  background: #171521;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: Arial, sans-serif;
-}
-#guest-login .login-box {
-  background: #242131;
-  padding: 35px;
-  border-radius: 18px;
-  width: 320px;
-  max-width: 85%;
-  text-align: center;
-}
-#guest-login h1 {
-  color: #a995ff;
-  font-size: 25px;
-}
-#guest-login input {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 14px;
-  border: 0;
-  border-radius: 9px;
-  background: #393447;
-  color: white;
-  margin: 15px 0;
-}
-#guest-login button {
-  width: 100%;
-  padding: 13px;
-  border: 0;
-  border-radius: 9px;
-  background: #7961e9;
-  color: white;
-  cursor: pointer;
-  font-weight: bold;
-}
-</style>
-
-<div id="guest-login">
-  <div class="login-box">
-    <h1>salimvearkadaşları</h1>
-    <p style="color:white">Özel arkadaş sunucumuza hoş geldin!</p>
-    <input id="guest-name" placeholder="Kullanıcı adını yaz..." maxlength="20">
-    <button onclick="guestLogin()">Misafir olarak giriş yap</button>
-    <p style="color:#aaa;font-size:12px">Üyelik ve şifre gerekmez ❤️</p>
+  <div class="app" id="app" aria-hidden="true">
+    <aside class="sidebar">
+      <div class="brand"><h1>🎧 salimvearkadaşları</h1></div>
+      <p class="server-label">ÖZEL SUNUCUMUZ</p>
+      <div class="room-link">🎙️　Sesli oda</div>
+      <hr>
+      <h3 class="side-heading">Odadaki kişiler <span id="voice-count" style="color:#9aabc2;font-weight:normal">(0)</span></h3>
+      <div id="sidebar-voice-users"><div class="empty">Henüz kimse katılmadı.</div></div>
+      <div class="side-bottom">
+        <div class="me"><div class="avatar" id="my-avatar">?</div><div class="me-info"><strong id="my-name">Misafir</strong><small>Misafir hesabı</small></div><button class="muted-btn" id="logout-btn" title="Çıkış yap">↪</button></div>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="top"><h1>Arkadaş odası</h1><span class="status-pill" id="connection-state">Bağlanıyor…</span></div>
+      <section class="card">
+        <h2>🔊 Sesli sohbet</h2>
+        <p class="online-title">🟢 Çevrimiçi arkadaşlar</p>
+        <div id="online-users" class="online-grid"><div class="empty">Giriş yapanlar burada görünür.</div></div>
+        <div class="voice-controls">
+          <button id="join-btn">Odaya katıl</button>
+          <button id="mute-btn" class="muted-btn" disabled>🎙 Mikrofon kapalı</button>
+          <button id="leave-btn" class="danger" disabled>Odadan ayrıl</button>
+        </div>
+        <p id="voice-status" class="statusline">Henüz sesli odaya katılmadın.</p>
+      </section>
+      <section class="card">
+        <h2>💬 Genel sohbet</h2>
+        <div id="messages"><div class="empty">Mesajlar yükleniyor…</div></div>
+        <div class="chatrow"><input id="msg" maxlength="2000" placeholder="Mesajını yaz…" autocomplete="off"><button id="send-btn">Gönder</button></div>
+      </section>
+    </main>
   </div>
-</div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <div class="login" id="guest-login">
+    <div class="login-box">
+      <div style="font-size:38px">🎧</div>
+      <h1>salimvearkadaşları</h1>
+      <p>Özel arkadaş sunucumuza hoş geldin!</p>
+      <input id="guest-name" maxlength="20" placeholder="Kullanıcı adını yaz…" autocomplete="nickname">
+      <button id="login-btn">Misafir olarak giriş yap</button>
+      <p class="login-note">Üyelik ve şifre gerekmez ❤️</p>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
 
 <script>
+"use strict";
+
+// Tarayıcıda yalnızca Supabase Publishable Key kullanılır; service_role/secret key eklenmez.
 const SUPABASE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co";
 const SUPABASE_KEY = "sb_publishable_miyRdM2azWa6gekBkfZ-Cg_V0GKcZw8";
-
 const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-window.db = db;
-  db.channel("messages-live")
-  .on(
-    "postgres_changes",
-    {
-      event: "INSERT",
-      schema: "public",
-      table: "messages"
-    },
-    
-    () => loadMessages()
-  )
 
-.subscribe((status, error) => {
-  console.log("Mesaj Realtime durumu:", status);
+let currentUser = null;
+let currentUsername = null;
+let onlineChannel = null;
+let voicePresenceChannel = null;
+let chatChannel = null;
+let livekitRoom = null;
+let muted = false;
+let leavingVoice = false;
 
-  if (error) {
-    console.error("Realtime hatası:", error);
-  }
-});
-  loadMessages();
-async function guestLogin() {
-  const name = document.getElementById("guest-name").value.trim();
+const $ = id => document.getElementById(id);
+function initials(name){return (name || "?").trim().slice(0,1).toLocaleUpperCase("tr-TR");}
+function toast(message){
+  const el=$("toast"); el.textContent=message; el.style.display="block";
+  clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.style.display="none",3500);
+}
+function setText(id,value){$(id).textContent=value ?? "";}
+function showApp(){
+  $("guest-login").style.display="none";
+  $("app").setAttribute("aria-hidden","false");
+  setText("my-name",currentUsername);
+  setText("my-avatar",initials(currentUsername));
+  setText("connection-state","Bağlandı");
+}
+function uniquePresencePeople(channel){
+  const all=Object.values(channel?.presenceState?.() || {}).flat();
+  return [...new Map(all.filter(p=>p && p.user_id).map(p=>[p.user_id,p])).values()];
+}
 
-  if (name.length < 2 || name.length > 20) {
-    alert("Kullanıcı adı 2-20 karakter olmalı!");
-    return;
-  }
-
-  const button = document.querySelector("#guest-login button");
-  button.disabled = true;
-  button.textContent = "Giriş yapılıyor...";
-
-  try {
-    const { data: sessionData, error: sessionError } =
-      await db.auth.getSession();
-
-    if (sessionError) throw sessionError;
-
-    let user = sessionData.session?.user;
-
-    if (!user) {
-      const { data, error } = await db.auth.signInAnonymously();
-      if (error) throw error;
-      user = data.user;
-    }
-
-    const { error } = await db.from("profiles").upsert(
-      { user_id: user.id, username: name },
-      { onConflict: "user_id" }
-    );
-
-    if (error) throw error;
-
-    localStorage.setItem("salim_guest_name", name);
-    await startOnlinePresence();
-    document.getElementById("guest-login").style.display = "none";
-
-    alert("Hoş geldin, " + name + "!");
-  } catch (error) {
-    console.error(error);
-    alert("Giriş hatası: " + error.message);
-  } finally {
-    button.disabled = false;
-    button.textContent = "Misafir olarak giriş yap";
+// Siteye giriş yapan herkes yalnızca ortadaki "Çevrimiçi arkadaşlar" alanında görünür.
+async function startOnlinePresence(){
+  if(!currentUser) return;
+  if(onlineChannel) await db.removeChannel(onlineChannel);
+  onlineChannel=db.channel("site-online-presence",{config:{presence:{key:currentUser.id}}});
+  onlineChannel.on("presence",{event:"sync"},renderOnlineUsers);
+  await subscribeAndWait(onlineChannel,"Çevrimiçi listesi");
+  await onlineChannel.track({user_id:currentUser.id,username:currentUsername});
+  renderOnlineUsers();
+}
+function renderOnlineUsers(){
+  const box=$("online-users"); if(!box) return;
+  box.replaceChildren();
+  const people=uniquePresencePeople(onlineChannel);
+  if(!people.length){box.innerHTML='<div class="empty">Şu anda çevrimiçi kimse yok.</div>';return;}
+  people.sort((a,b)=>(a.username||"").localeCompare(b.username||"","tr"));
+  for(const person of people){
+    const item=document.createElement("div"); item.className="online-person";
+    const avatar=document.createElement("div"); avatar.className="avatar"; avatar.textContent=initials(person.username);
+    const name=document.createElement("span"); name.className="online-name"; name.textContent=person.username||"Misafir";
+    const dot=document.createElement("i"); dot.className="online-dot";
+    item.append(avatar,name,dot); box.append(item);
   }
 }
 
-window.addEventListener("DOMContentLoaded", async function () {
-  const { data, error } = await db.auth.getSession();
-
-  if (error || !data.session) return;
-
-  const { data: profile } = await db
-    .from("profiles")
-    .select("username")
-    .eq("user_id", data.session.user.id)
-    .maybeSingle();
-
-  if (profile) {
-    localStorage.setItem("salim_guest_name", profile.username);
-    await startOnlinePresence();
-    document.getElementById("guest-login").style.display = "none";
-  }
-});
-  
-let onlineChannel = null;
-
-async function startOnlinePresence() {
-  const { data: { user } } = await db.auth.getUser();
-  const username = localStorage.getItem("salim_guest_name");
-
-  if (!user || !username) return;
-
-  if (onlineChannel) {
-    await db.removeChannel(onlineChannel);
-  }
-
-  onlineChannel = db.channel("site-online-presence", {
-    config: {
-      presence: { key: user.id }
-    }
-  });
-
-  function renderOnlineUsers() {
-    const box = document.getElementById("online-users");
-    if (!box) return;
-
-    const state = onlineChannel.presenceState();
-    const people = Object.values(state).flat();
-
-    box.replaceChildren();
-
-    if (people.length === 0) {
-      box.textContent = "Şu anda çevrimiçi kimse yok.";
-      return;
-    }
-
-    const unique = [...new Map(
-      people.map(person => [person.user_id, person])
-    ).values()];
-
-    unique.forEach(person => {
-      const item = document.createElement("div");
-      item.className = "user";
-
-      const avatar = document.createElement("div");
-      avatar.className = "avatar";
-      avatar.textContent = "👤";
-
-      const name = document.createElement("div");
-      name.className = "name";
-      name.textContent = person.username;
-
-      item.append(avatar, name);
-      box.appendChild(item);
-    });
-  }
-
-  onlineChannel
-    .on("presence", { event: "sync" }, renderOnlineUsers)
-    .subscribe(async status => {
-      if (status === "SUBSCRIBED") {
-        await onlineChannel.track({
-          user_id: user.id,
-          username: username
-        });
+// Ses odası listesi sadece Presence üzerinden beslenir. DB'de kalıcı voice_members kaydı tutulmaz.
+async function subscribeVoicePresence(){
+  if(!currentUser) return;
+  if(voicePresenceChannel) await db.removeChannel(voicePresenceChannel);
+  voicePresenceChannel=db.channel("voice-room-live",{config:{presence:{key:currentUser.id}}});
+  voicePresenceChannel.on("presence",{event:"sync"},renderSidebarVoiceUsers);
+  await subscribeAndWait(voicePresenceChannel,"Ses odası listesi");
+  renderSidebarVoiceUsers();
+}
+async function subscribeAndWait(channel,label){
+  await new Promise((resolve,reject)=>{
+    const timeout=setTimeout(()=>reject(new Error(label+" bağlantısı zaman aşımına uğradı.")),12000);
+    channel.subscribe(status=>{
+      if(status==="SUBSCRIBED"){clearTimeout(timeout);resolve();}
+      else if(status==="CHANNEL_ERROR" || status==="TIMED_OUT"){
+        clearTimeout(timeout);reject(new Error(label+" bağlantısı kurulamadı: "+status));
       }
     });
+  });
+}
+function renderSidebarVoiceUsers(){
+  const box=$("sidebar-voice-users"); if(!box) return;
+  box.replaceChildren();
+  const people=uniquePresencePeople(voicePresenceChannel);
+  setText("voice-count","("+people.length+")");
+  if(!people.length){box.innerHTML='<div class="empty">Henüz kimse katılmadı.</div>';return;}
+  people.sort((a,b)=>(a.username||"").localeCompare(b.username||"","tr"));
+  for(const person of people){
+    const row=document.createElement("div"); row.className="sidebar-person";
+    const avatar=document.createElement("div"); avatar.className="avatar"; avatar.textContent=initials(person.username);
+    const name=document.createElement("strong"); name.textContent=person.username||"Misafir";
+    row.append(avatar,name); box.append(row);
+  }
 }
 
+async function login(){
+  const name=$("guest-name").value.trim();
+  if(name.length<2 || name.length>20){toast("Kullanıcı adı 2–20 karakter olmalı.");return;}
+  const btn=$("login-btn"); btn.disabled=true; btn.textContent="Giriş yapılıyor…";
+  try{
+    const {data:{session},error:sessionError}=await db.auth.getSession();
+    if(sessionError) throw sessionError;
+    let user=session?.user;
+    if(!user){
+      const result=await db.auth.signInAnonymously();
+      if(result.error) throw result.error;
+      user=result.data.user;
+    }
+    const {error:profileError}=await db.from("profiles").upsert(
+      {user_id:user.id,username:name},{onConflict:"user_id"}
+    );
+    if(profileError) throw profileError;
+    currentUser=user; currentUsername=name;
+    localStorage.setItem("salim_guest_name",name);
+    showApp();
+    await startOnlinePresence();
+    await subscribeVoicePresence();
+    await loadMessages();
+    await subscribeMessages();
+    toast("Hoş geldin, "+name+"!");
+  }catch(error){
+    console.error(error); toast("Giriş hatası: "+error.message);
+  }finally{
+    btn.disabled=false; btn.textContent="Misafir olarak giriş yap";
+  }
+}
+async function restoreSession(){
+  try{
+    const {data:{session},error}=await db.auth.getSession();
+    if(error || !session) return;
+    const {data:profile,error:profileError}=await db.from("profiles").select("username").eq("user_id",session.user.id).maybeSingle();
+    if(profileError || !profile?.username) return;
+    currentUser=session.user; currentUsername=profile.username;
+    localStorage.setItem("salim_guest_name",currentUsername);
+    showApp();
+    await startOnlinePresence();
+    await subscribeVoicePresence();
+    await loadMessages();
+    await subscribeMessages();
+  }catch(error){console.error("Oturum geri yüklenemedi:",error);}
+}
+
+async function joinVoice(){
+  if(!currentUser){toast("Önce giriş yapmalısın.");return;}
+  if(livekitRoom) return;
+  const btn=$("join-btn"); btn.disabled=true;
+  setText("voice-status","Ses odasına bağlanılıyor…");
+  try{
+    const {data:{session},error}=await db.auth.getSession();
+    if(error) throw error;
+    if(!session?.access_token) throw new Error("Oturum bulunamadı.");
+    const response=await fetch("/api/livekit-token",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token}
+    });
+    const result=await response.json();
+    if(!response.ok) throw new Error(result.error||"Ses bağlantısı kurulamadı.");
+
+    livekitRoom=new LivekitClient.Room();
+    livekitRoom.on(LivekitClient.RoomEvent.TrackSubscribed,track=>{
+      if(track.kind==="audio"){
+        const audio=track.attach(); audio.autoplay=true; document.body.appendChild(audio);
+      }
+    });
+    livekitRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed,track=>{
+      track.detach().forEach(element=>element.remove());
+    });
+    livekitRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{
+      if(!leavingVoice) resetVoiceUi("Ses bağlantısı kesildi.");
+    });
+
+    await livekitRoom.connect(result.serverUrl,result.token);
+    await livekitRoom.localParticipant.setMicrophoneEnabled(true);
+    muted=false;
+    if(voicePresenceChannel){
+      const presenceStatus=await voicePresenceChannel.track({user_id:currentUser.id,username:currentUsername});
+      if(presenceStatus && presenceStatus!=="ok") console.warn("Ses odası Presence track sonucu:",presenceStatus);
+    }
+    $("mute-btn").disabled=false;
+    $("leave-btn").disabled=false;
+    $("mute-btn").textContent="🎙 Mikrofonu kapat";
+    setText("voice-status","Sesli odaya katıldın!");
+    renderSidebarVoiceUsers();
+    toast("Sesli odaya katıldın!");
+  }catch(error){
+    console.error(error);
+    if(livekitRoom){try{await livekitRoom.disconnect();}catch{} livekitRoom=null;}
+    setText("voice-status","Hata: "+error.message);
+    toast("Ses bağlantısı: "+error.message);
+  }finally{
+    btn.disabled=!!livekitRoom;
+  }
+}
+async function toggleMute(){
+  if(!livekitRoom) return;
+  try{
+    muted=!muted;
+    await livekitRoom.localParticipant.setMicrophoneEnabled(!muted);
+    $("mute-btn").textContent=muted?"🎙 Mikrofonu aç":"🎙 Mikrofonu kapat";
+  }catch(error){muted=!muted;toast("Mikrofon hatası: "+error.message);}
+}
+function resetVoiceUi(message){
+  livekitRoom=null; muted=false; leavingVoice=false;
+  $("join-btn").disabled=false; $("mute-btn").disabled=true; $("leave-btn").disabled=true;
+  $("mute-btn").textContent="🎙 Mikrofon kapalı";
+  setText("voice-status",message);
+  if(voicePresenceChannel) voicePresenceChannel.untrack().catch(console.error);
+}
+async function leaveVoice(){
+  if(leavingVoice) return;
+  leavingVoice=true;
+  try{
+    if(livekitRoom){
+      const room=livekitRoom; livekitRoom=null;
+      await room.disconnect();
+    }
+    if(voicePresenceChannel) await voicePresenceChannel.untrack();
+    muted=false;
+    $("join-btn").disabled=false; $("mute-btn").disabled=true; $("leave-btn").disabled=true;
+    $("mute-btn").textContent="🎙 Mikrofon kapalı";
+    setText("voice-status","Odadan ayrıldın.");
+    renderSidebarVoiceUsers();
+    toast("Sesli odadan ayrıldın.");
+  }catch(error){
+    console.error(error); toast("Odadan ayrılırken hata: "+error.message);
+  }finally{leavingVoice=false;}
+}
+
+function timeLabel(value){
+  try{return new Date(value).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});}
+  catch{return "";}
+}
+async function loadMessages(){
+  const {data,error}=await db.from("messages").select("id,content,created_at,user_id").order("created_at",{ascending:true}).limit(100);
+  if(error){console.error(error);$("messages").innerHTML='<div class="empty">Mesajlar yüklenemedi. Supabase tablo izinlerini kontrol edin.</div>';return;}
+  const ids=[...new Set(data.map(message=>message.user_id))];
+  let names=new Map();
+  if(ids.length){
+    const {data:profiles,error:profileError}=await db.from("profiles").select("user_id,username").in("user_id",ids);
+    if(!profileError) names=new Map((profiles||[]).map(profile=>[profile.user_id,profile.username]));
+  }
+  const box=$("messages"); box.replaceChildren();
+  for(const message of data){
+    const row=document.createElement("div"); row.className="message";
+    const who=document.createElement("strong"); who.textContent=names.get(message.user_id)||"Misafir";
+    const time=document.createElement("time"); time.textContent=timeLabel(message.created_at);
+    const content=document.createElement("span"); content.textContent=message.content;
+    row.append(who,time,document.createTextNode(" "),content); box.append(row);
+  }
+  box.scrollTop=box.scrollHeight;
+}
+async function sendMessage(){
+  const input=$("msg"); const content=input.value.trim();
+  if(!content) return;
+  if(!currentUser){toast("Önce giriş yapmalısın.");return;}
+  $("send-btn").disabled=true;
+  try{
+    const {error}=await db.from("messages").insert({user_id:currentUser.id,content});
+    if(error) throw error;
+    input.value=""; await loadMessages();
+  }catch(error){console.error(error);toast("Mesaj gönderilemedi: "+error.message);}
+  finally{$("send-btn").disabled=false;}
+}
+async function subscribeMessages(){
+  if(chatChannel) await db.removeChannel(chatChannel);
+  chatChannel=db.channel("messages-live")
+    .on("postgres_changes",{event:"*",schema:"public",table:"messages"},loadMessages)
+    .subscribe();
+}
+async function logout(){
+  await leaveVoice();
+  if(onlineChannel) await db.removeChannel(onlineChannel);
+  if(voicePresenceChannel) await db.removeChannel(voicePresenceChannel);
+  if(chatChannel) await db.removeChannel(chatChannel);
+  await db.auth.signOut();
+  currentUser=null; currentUsername=null; location.reload();
+}
+
+$("login-btn").addEventListener("click",login);
+$("guest-name").addEventListener("keydown",event=>{if(event.key==="Enter") login();});
+$("send-btn").addEventListener("click",sendMessage);
+$("msg").addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();sendMessage();}});
+$("join-btn").addEventListener("click",joinVoice);
+$("mute-btn").addEventListener("click",toggleMute);
+$("leave-btn").addEventListener("click",leaveVoice);
+$("logout-btn").addEventListener("click",logout);
+
+// Sekme kapanırken Presence bağlantısı kesilir; Supabase Presence de bağlantı kaybını temizler.
+window.addEventListener("pagehide",()=>{
+  try{if(livekitRoom) livekitRoom.disconnect();}catch{}
+});
+
+(async()=>{await restoreSession();})();
 </script>
+</body>
+</html>
