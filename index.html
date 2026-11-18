@@ -218,6 +218,7 @@ let musicScope = null;
 let musicSession = null;
 let musicYouTubeApi = null;
 let musicYouTubePlayer = null;
+let musicPlayerReady = false;
 let musicSeekTimer = null;
 let musicSeekSample = null;
 let musicSeekIgnoreUntil = 0;
@@ -935,15 +936,16 @@ function notifyIncomingChat(){
 }
 
 function renderMusicSession(session, serverNow){
-  const key=session ? session.room+"/"+session.video_id+"/"+session.started_at : null;
+  const key=session ? session.room+"/"+session.video_id+"/"+session.started_at+"/"+session.paused_position : null;
   if(key===musicSession?.key || (!key && !musicSession)) return;
   const next=session ? {
-    key, videoId:session.video_id, startedAt:session.started_at,
+    key, videoId:session.video_id, startedAt:session.started_at, pausedPosition:session.paused_position ?? null,
     age:Math.max(0,serverNow-Date.parse(session.started_at)), receivedAt:performance.now()
   } : null;
   if(next && musicSession?.videoId===next.videoId){
+    const pauseChanged=(musicSession.pausedPosition===null)!==(next.pausedPosition===null);
     Object.assign(musicSession,next);
-    if(musicYouTubePlayer?.getDuration) alignMusicPlayer(musicYouTubePlayer,musicSession);
+    if(musicPlayerReady) applyMusicPlayback(musicYouTubePlayer,musicSession,pauseChanged);
     return;
   }
   musicSession=next;
@@ -954,6 +956,7 @@ function renderMusicSession(session, serverNow){
   $("music-unmute").hidden=true;
   if(musicYouTubePlayer) musicYouTubePlayer.destroy();
   musicYouTubePlayer=null;
+  musicPlayerReady=false;
   $("music-player").replaceChildren();
   $("music-session").hidden=!musicSession;
   $("music-stop").disabled=!musicSession || musicCommandPending;
@@ -962,15 +965,27 @@ function renderMusicSession(session, serverNow){
 }
 
 function musicElapsed(session){
-  return (session.age+performance.now()-session.receivedAt)/1000;
+  return session.pausedPosition ?? (session.age+performance.now()-session.receivedAt)/1000;
 }
 
 function alignMusicPlayer(player,session){
   const expected=musicElapsed(session);
-  if(expected>=player.getDuration() || Math.abs(player.getCurrentTime()-expected)<=2) return;
+  if(expected>=player.getDuration() || Math.abs(player.getCurrentTime()-expected)<=(session.pausedPosition===null ? 2 : 0.25)) return;
   musicSeekSample=null;
   musicSeekIgnoreUntil=performance.now()+2000;
   player.seekTo(expected,true);
+}
+
+function applyMusicPlayback(player,session,toggle=true){
+  if(toggle && session.pausedPosition!==null) player.pauseVideo();
+  alignMusicPlayer(player,session);
+  if(toggle && session.pausedPosition===null) player.playVideo();
+}
+
+function musicPositionCommand(action,session,position){
+  void sendMusicCommand(action,{
+    videoId:session.videoId,startedAt:session.startedAt,position,paused:session.pausedPosition!==null
+  });
 }
 
 function detectMusicSeek(player,session,states){
@@ -989,7 +1004,7 @@ function detectMusicSeek(player,session,states){
   if(!previous || now-previous.now>4000) return;
   const progressed=previous.state===states.PLAYING ? (now-previous.now)/1000 : 0;
   if(Math.abs(position-previous.position-progressed)>2.5){
-    void sendMusicCommand("seek",{videoId:session.videoId,startedAt:session.startedAt,position});
+    musicPositionCommand("seek",session,position);
   }
 }
 
@@ -1016,7 +1031,7 @@ function openMusicPlayer(){
   const elapsed=Math.floor(musicElapsed(session));
   const url=new URL("https://www.youtube.com/embed/"+musicSession.videoId);
   url.search=new URLSearchParams({
-    autoplay:"1",start:String(elapsed),playsinline:"1",enablejsapi:"1",origin:location.origin
+    autoplay:session.pausedPosition===null ? "1" : "0",start:String(elapsed),playsinline:"1",enablejsapi:"1",origin:location.origin
   });
   const frame=document.createElement("iframe");
   frame.title="Müzik Botu YouTube oynatıcısı";
@@ -1032,18 +1047,35 @@ function openMusicPlayer(){
       events:{
         onReady:({target})=>{
           if(session!==musicSession) return;
-          target.playVideo();
+          musicPlayerReady=true;
+          if(session.pausedPosition===null){
+            if(target.getPlayerState()===api.PlayerState.PLAYING){
+              aligned=true;
+              alignMusicPlayer(target,session);
+            }else target.playVideo();
+          }else target.pauseVideo();
           musicSeekTimer=setInterval(()=>detectMusicSeek(target,session,api.PlayerState),400);
         },
         onAutoplayBlocked:({target})=>{
-          if(session!==musicSession || target.isMuted()) return;
+          if(session!==musicSession || session.pausedPosition!==null || target.isMuted()) return;
           target.mute();
           $("music-unmute").hidden=false;
           target.playVideo();
         },
         onStateChange:({data,target})=>{
-          if(session!==musicSession || data!==api.PlayerState.PLAYING) return;
+          if(session!==musicSession || !musicPlayerReady) return;
+          if(data===api.PlayerState.PAUSED && aligned && session.pausedPosition===null && !musicCommandPending){
+            musicPositionCommand("pause",session,target.getCurrentTime());
+          }
+          if(data!==api.PlayerState.PLAYING) return;
           if(!target.isMuted?.()) $("music-unmute").hidden=true;
+          if(session.pausedPosition!==null){
+            if(!musicCommandPending){
+              aligned=true;
+              musicPositionCommand("resume",session,musicElapsed(session));
+            }
+            return;
+          }
           if(aligned) return;
           aligned=true;
           alignMusicPlayer(target,session);
@@ -1457,7 +1489,7 @@ $("music-form").addEventListener("submit",event=>{
 $("music-unmute").addEventListener("click",()=>{
   if(!musicYouTubePlayer) return;
   musicYouTubePlayer.unMute();
-  musicYouTubePlayer.playVideo();
+  if(musicSession?.pausedPosition===null) musicYouTubePlayer.playVideo();
   $("music-unmute").hidden=true;
 });
 document.addEventListener("visibilitychange",()=>{

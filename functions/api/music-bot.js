@@ -2,7 +2,7 @@ import { ALLOWED_ROOMS, authenticateVoiceUser } from "./_voice-auth.js";
 import { roomCall } from "./moderation.js";
 
 const STATE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co/rest/v1/room_music_session";
-const FIELDS = "room,video_id,started_at";
+const FIELDS = "room,video_id,started_at,paused_position";
 const reply = (body, status = 200) => Response.json(body, {
   status, headers: { "Cache-Control": "no-store" }
 });
@@ -45,7 +45,7 @@ export async function onRequestPost({ request, env, waitUntil = () => {} }) {
     const body = await request.json().catch(() => null);
     const room = body?.roomName;
     const action = body?.action;
-    if (!ALLOWED_ROOMS.has(room) || !["state", "play", "stop", "seek"].includes(action)) {
+    if (!ALLOWED_ROOMS.has(room) || !["state", "play", "stop", "seek", "pause", "resume"].includes(action)) {
       return reply({ error: "Geçersiz müzik komutu veya ses odası." }, 400);
     }
 
@@ -66,7 +66,7 @@ export async function onRequestPost({ request, env, waitUntil = () => {} }) {
       return reply({ error: "Önce bu ses odasına katıl." }, 403);
     }
 
-    if (action === "seek") {
+    if (["seek", "pause", "resume"].includes(action)) {
       const { videoId: currentVideo, startedAt, position } = body;
       if (typeof currentVideo !== "string" || !/^[A-Za-z0-9_-]{11}$/.test(currentVideo)
           || typeof startedAt !== "string" || !Number.isFinite(Date.parse(startedAt))
@@ -78,7 +78,8 @@ export async function onRequestPost({ request, env, waitUntil = () => {} }) {
         started_at: `eq.${new Date(startedAt).toISOString()}`, select: FIELDS
       });
       const session = await stateRequest(env, "PATCH", "?" + filters, {
-        started_at: new Date(Date.now() - position * 1000).toISOString()
+        started_at: new Date(Date.now() - position * 1000).toISOString(),
+        paused_position: action === "pause" || (action === "seek" && body.paused === true) ? position : null
       });
       if (!session) return reply({ error: "Müzik oturumu değişti." }, 409);
       notifyRooms(env, [room], waitUntil);
@@ -92,7 +93,7 @@ export async function onRequestPost({ request, env, waitUntil = () => {} }) {
     }
 
     const session = await stateRequest(env, "POST", `?on_conflict=slot&select=${FIELDS}`, {
-      slot: 1, room, video_id: videoId, started_at: new Date().toISOString()
+      slot: 1, room, video_id: videoId, started_at: new Date().toISOString(), paused_position: null
     });
     notifyRooms(env, [...ALLOWED_ROOMS], waitUntil);
     return reply({ session, now: Date.now() });
