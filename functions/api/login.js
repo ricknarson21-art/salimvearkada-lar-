@@ -1,4 +1,3 @@
-const internalEmail =   username.toLowerCase() +   "@accounts.bi
 const SUPABASE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co";
 
 function reply(data, status = 200) {
