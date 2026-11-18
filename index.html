@@ -44,6 +44,9 @@
     .owner-panel h4{font-size:13px;margin:0 0 8px}
     .admin-account{display:flex;align-items:center;justify-content:space-between;gap:5px;font-size:12px;padding:5px 0;border-bottom:1px solid #29405e;overflow-wrap:anywhere}
     .admin-account button{padding:5px 7px;font-size:11px}
+    .admin-account{flex-wrap:wrap;padding:8px 0}.admin-account>span{flex:1 1 100%}
+    .ban-action{background:#963541}.unban-action{background:#276856}.delete-action{background:#6f1823}
+    .owner-help{font-size:11px;color:var(--muted);margin:4px 0 8px}
     .chat-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
     .chat-title-row h2{margin:0}
     #clear-chat-btn{display:none;background:#862e41;padding:7px 10px;font-size:12px}
@@ -113,6 +116,7 @@
       <div id="sidebar-voice-users"><div class="empty">Henüz kimse katılmadı.</div></div>
       <section id="owner-admin-panel" class="owner-panel" hidden>
         <h4>👑 Admin yönetimi</h4>
+        <p class="owner-help">Ban: hesabın erişimini keser. Kaydı sil: hesabı kalıcı kaldırır. İşlemler sadece kurucuya açıktır.</p>
         <div id="owner-admin-list"></div>
       </section>
       <div class="side-bottom">
@@ -563,6 +567,7 @@ function renderOwnerPanel(){
       const btn=document.createElement("button");
       btn.textContent=account.role==="admin"?"Adminliği al":"Admin yap";
       btn.title="Yetki değiştir";
+      btn.disabled=Boolean(account.banned);
       btn.addEventListener("click",async()=>{
         const nextRole=account.role==="admin"?"member":"admin";
         if(!confirm(account.username+" için "+(nextRole==="admin"?"admin yetkisi verilsin mi?":"admin yetkisi kaldırılsın mı?")))return;
@@ -574,6 +579,45 @@ function renderOwnerPanel(){
         }catch(error){toast(error.message);btn.disabled=false;}
       });
       row.append(btn);
+      if(account.banned){
+        const unban=document.createElement("button");unban.type="button";unban.className="unban-action";
+        unban.textContent="✅ Ban kaldır";
+        unban.addEventListener("click",async()=>{
+          if(!confirm(account.username+" adlı hesabın banı kaldırılsın mı?"))return;
+          unban.disabled=true;
+          try{
+            const r=await moderationRequest({action:"unban_user",targetUserId:account.user_id});
+            toast(r.message||"Ban kaldırıldı");await refreshModerationStatus();
+          }catch(error){toast(error.message);unban.disabled=false;}
+        });
+        row.append(unban);
+      }else{
+        const ban=document.createElement("button");ban.type="button";ban.className="ban-action";
+        ban.textContent="🚫 Banla";
+        ban.addEventListener("click",async()=>{
+          if(!confirm(account.username+" sunucudan banlansın mı? Kayıtlı hesabıyla tekrar giremez."))return;
+          ban.disabled=true;
+          try{
+            const r=await moderationRequest({action:"ban_user",targetUserId:account.user_id});
+            toast(r.message||"Hesap banlandı");await refreshModerationStatus();
+          }catch(error){toast(error.message);ban.disabled=false;}
+        });
+        row.append(ban);
+      }
+      const del=document.createElement("button");del.type="button";del.className="delete-action";
+      del.textContent="🗑 Kaydı sil";
+      del.title="Kalıcı: geri alınamaz";
+      del.addEventListener("click",async()=>{
+        if(!confirm(account.username+" hesabı KALICI OLARAK silinsin mi? Bu işlem geri alınamaz."))return;
+        const typed=prompt("Silme işlemini onaylamak için kullanıcı adını aynen yaz:","");
+        if(typed!==account.username){toast("Kullanıcı adı eşleşmedi, silme iptal edildi.");return;}
+        del.disabled=true;
+        try{
+          const r=await moderationRequest({action:"delete_account",targetUserId:account.user_id,confirmUsername:typed});
+          toast(r.message||"Hesap silindi");await refreshModerationStatus();
+        }catch(error){toast(error.message);del.disabled=false;}
+      });
+      row.append(del);
     }
     box.append(row);
   }
@@ -677,7 +721,52 @@ async function accountRequest(path,username,password){
   if(!response.ok) throw new Error(result.error||"Sunucu hatası ("+response.status+")");
   return result;
 }
+let accessPollTimer=null;
+let accessPollBusy=false;
+let accessBlocking=false;
+async function checkServerAccess(){
+  const {data:{session},error}=await db.auth.getSession();
+  if(error||!session?.access_token) return {allowed:false,code:"NO_SESSION"};
+  const res=await fetch("/api/account-status",{
+    headers:{Authorization:"Bearer "+session.access_token},cache:"no-store"
+  });
+  if(res.status===401) return {allowed:false,code:"NO_SESSION"};
+  if(res.status===403) return {allowed:false,code:"ACCOUNT_BANNED"};
+  if(!res.ok) throw new Error("Hesap kontrolü geçici olarak yapılamıyor.");
+  return {allowed:true};
+}
+async function removeBlockedSession(message){
+  if(accessBlocking)return;
+  accessBlocking=true;
+  if(accessPollTimer!==null){clearInterval(accessPollTimer);accessPollTimer=null;}
+  try{if(livekitRoom)await livekitRoom.disconnect();}catch{}
+  try{await db.auth.signOut({scope:"local"});}catch{}
+  sessionStorage.setItem("birartibir_access_notice",message);
+  location.reload();
+}
+function startAccessPolling(){
+  if(accessPollTimer!==null)clearInterval(accessPollTimer);
+  accessPollTimer=setInterval(async()=>{
+    if(accessPollBusy||accessBlocking||!currentUser||accountType!=="registered")return;
+    accessPollBusy=true;
+    try{
+      const result=await checkServerAccess();
+      if(!result.allowed) await removeBlockedSession(
+        result.code==="ACCOUNT_BANNED"?"Bu hesap sunucudan banlandı.":"Bu hesap silindi veya oturumu sonlandırıldı."
+      );
+    }catch(error){console.warn("Hesap erişimi kontrolü:",error);}
+    finally{accessPollBusy=false;}
+  },20000);
+}
 async function startAuthenticatedApp(user,name,type){
+  if(type==="registered"){
+    const access=await checkServerAccess();
+    if(!access.allowed){
+      await db.auth.signOut({scope:"local"}).catch(()=>{});
+      throw new Error(access.code==="ACCOUNT_BANNED"
+        ?"Bu hesap sunucudan banlandı.":"Bu hesap silinmiş veya oturumu geçersiz.");
+    }
+  }
   currentUser=user;
   currentUsername=name;
   accountType=type;
@@ -688,6 +777,7 @@ async function startAuthenticatedApp(user,name,type){
   await loadMessages();
   await subscribeMessages();
   void refreshModerationStatus();
+  if(type==="registered")startAccessPolling();
 }
 async function login(){
   const name=$("guest-name").value.trim();
@@ -1108,6 +1198,7 @@ async function subscribeMessages(){
     .subscribe();
 }
 async function logout(){
+  if(accessPollTimer!==null){clearInterval(accessPollTimer);accessPollTimer=null;}
   await leaveVoice();
   if(onlineChannel) await db.removeChannel(onlineChannel);
   if(voicePresenceChannel) await db.removeChannel(voicePresenceChannel);
@@ -1141,7 +1232,11 @@ window.addEventListener("pagehide",()=>{
   try{if(livekitRoom) livekitRoom.disconnect();}catch{}
 });
 
-(async()=>{await restoreSession();})();
+(async()=>{
+  await restoreSession();
+  const notice=sessionStorage.getItem("birartibir_access_notice");
+  if(notice){sessionStorage.removeItem("birartibir_access_notice");$("auth-error").textContent=notice;}
+})();
 </script>
 </body>
 </html>
