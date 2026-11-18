@@ -10,6 +10,34 @@ function reply(data, status = 200) {
   });
 }
 
+async function verifyTurnstile(token, request, secret) {
+  if (typeof token !== "string" || !token || !secret) {
+    return false;
+  }
+
+  const form = new FormData();
+  form.append("secret", secret);
+  form.append("response", token);
+
+  const ip = request.headers.get("CF-Connecting-IP");
+  if (ip) form.append("remoteip", ip);
+
+  const response = await fetch(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    {
+      method: "POST",
+      body: form
+    }
+  );
+
+  if (!response.ok) return false;
+
+  const result = await response.json();
+
+  return result.success === true &&
+    result.hostname === "birartibir.online";
+}
+
 export async function onRequestPost({ request, env }) {
   try {
     const origin = new URL(request.url).origin;
@@ -18,33 +46,51 @@ export async function onRequestPost({ request, env }) {
       return reply({ error: "Geçersiz istek." }, 403);
     }
 
+    if (
+      !env.SUPABASE_PUBLISHABLE_KEY ||
+      !env.TURNSTILE_SECRET_KEY
+    ) {
+      return reply({
+        error: "Sunucu yapılandırması eksik."
+      }, 500);
+    }
+
     const body = await request.json().catch(() => null);
+
     const username = body?.username?.trim();
     const password = body?.password;
+    const turnstileToken = body?.turnstileToken;
 
     if (
       typeof username !== "string" ||
       !/^[a-zA-Z0-9_]{3,20}$/.test(username) ||
       typeof password !== "string" ||
-      password.length < 1
+      password.length < 1 ||
+      password.length > 128
     ) {
       return reply({
         error: "Kullanıcı adı veya şifre geçersiz."
       }, 400);
     }
 
-    if (!env.SUPABASE_PUBLISHABLE_KEY) {
+    const verified = await verifyTurnstile(
+      turnstileToken,
+      request,
+      env.TURNSTILE_SECRET_KEY
+    );
+
+    if (!verified) {
       return reply({
-        error: "Sunucu yapılandırması eksik."
-      }, 500);
+        error: "Güvenlik doğrulaması başarısız."
+      }, 403);
     }
 
-    // Kayıtlı hesapların dahili kimliği.
-    // Kullanıcıdan e-posta istenmez.
+    // Kullanıcı adından dahili giriş kimliği oluşturulur.
     const internalEmail =
-      username.toLowerCase() + "@accounts.birartibir.invalid";
+      username.toLowerCase() +
+      "@accounts.birartibir.invalid";
 
-    // Şifre doğrulamasını Supabase Auth yapar.
+    // Şifreyi yalnızca Supabase Auth doğrular.
     const response = await fetch(
       SUPABASE_URL + "/auth/v1/token?grant_type=password",
       {
