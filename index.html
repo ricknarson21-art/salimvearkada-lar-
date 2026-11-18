@@ -229,20 +229,49 @@ async function subscribeAndWait(channel,label){
     });
   });
 }
+
 function renderSidebarVoiceUsers(){
-  const box=$("sidebar-voice-users"); if(!box) return;
+  const box=$("sidebar-voice-users");
+  if(!box) return;
+
   box.replaceChildren();
+
   const people=uniquePresencePeople(voicePresenceChannel);
+
   setText("voice-count","("+people.length+")");
-  if(!people.length){box.innerHTML='<div class="empty">Henüz kimse katılmadı.</div>';return;}
-  people.sort((a,b)=>(a.username||"").localeCompare(b.username||"","tr"));
+
+  if(!people.length){
+    box.innerHTML='<div class="empty">Henüz kimse katılmadı.</div>';
+    return;
+  }
+
+  people.sort((a,b)=>
+    (a.username||"").localeCompare(b.username||"","tr")
+  );
+
   for(const person of people){
-    const row=document.createElement("div"); row.className="sidebar-person";
-    const avatar=document.createElement("div"); avatar.className="avatar"; avatar.textContent=initials(person.username);
-    const name=document.createElement("strong"); name.textContent=person.username||"Misafir";
-    row.append(avatar,name); box.append(row);
+    const row=document.createElement("div");
+
+    row.className="sidebar-person"+
+      (activeSpeakerIds.has(person.user_id)?" speaking":"");
+
+    const avatar=document.createElement("div");
+    avatar.className="avatar";
+    avatar.textContent=initials(person.username);
+
+    const name=document.createElement("strong");
+    name.textContent=person.username||"Misafir";
+
+    const mic=document.createElement("span");
+    mic.textContent=person.muted ? "🔇" : "🎙️";
+    mic.title=person.muted ? "Mikrofon kapalı" : "Mikrofon açık";
+    mic.style.marginLeft="auto";
+
+    row.append(avatar,name,mic);
+    box.append(row);
   }
 }
+
 
 async function login(){
   const name=$("guest-name").value.trim();
@@ -329,7 +358,12 @@ async function joinVoice(){
     await livekitRoom.localParticipant.setMicrophoneEnabled(true);
     muted=false;
     if(voicePresenceChannel){
-      const presenceStatus=await voicePresenceChannel.track({user_id:currentUser.id,username:currentUsername,room_name:selectedRoom});
+      const presenceStatus=await voicePresenceChannel.track({
+  user_id:currentUser.id,
+  username:currentUsername,
+  room_name:selectedRoom,
+  muted:false
+});
       if(presenceStatus && presenceStatus!=="ok") console.warn("Ses odası Presence track sonucu:",presenceStatus);
     }
     $("mute-btn").disabled=false;
@@ -347,22 +381,37 @@ async function joinVoice(){
     btn.disabled=!!livekitRoom;
   }
 }
+
 async function toggleMute(){
   if(!livekitRoom) return;
+
   try{
-    muted=!muted;
-    await livekitRoom.localParticipant.setMicrophoneEnabled(!muted);
-    $("mute-btn").textContent=muted?"🎙 Mikrofonu aç":"🎙 Mikrofonu kapat";
-  }catch(error){muted=!muted;toast("Mikrofon hatası: "+error.message);}
+    const nextMuted = !muted;
+
+    await livekitRoom.localParticipant.setMicrophoneEnabled(!nextMuted);
+
+    muted = nextMuted;
+
+    $("mute-btn").textContent = muted
+      ? "🔇 Mikrofonu aç"
+      : "🎙 Mikrofonu kapat";
+
+    if(voicePresenceChannel && currentUser){
+      await voicePresenceChannel.track({
+        user_id:currentUser.id,
+        username:currentUsername,
+        room_name:selectedRoom,
+        muted:muted
+      });
+    }
+
+    renderSidebarVoiceUsers();
+
+  }catch(error){
+    toast("Mikrofon hatası: "+error.message);
+  }
 }
-function resetVoiceUi(message){
-  livekitRoom=null; muted=false; leavingVoice=false; activeSpeakerIds.clear();
-  $("join-btn").disabled=false; $("mute-btn").disabled=true; $("leave-btn").disabled=true;
-  $("mute-btn").textContent="🎙 Mikrofon kapalı";
-  setText("voice-status",message);
-  if(voicePresenceChannel) voicePresenceChannel.untrack().catch(console.error);
-  renderSidebarVoiceUsers();
-}
+
 async function leaveVoice(){
   if(leavingVoice) return;
   leavingVoice=true;
