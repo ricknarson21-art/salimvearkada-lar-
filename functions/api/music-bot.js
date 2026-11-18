@@ -1,8 +1,10 @@
 import { ALLOWED_ROOMS, authenticateVoiceUser } from "./_voice-auth.js";
-import { roomCall } from "./moderation.js";
+import { roleOf, roomCall } from "./moderation.js";
 
 const STATE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co/rest/v1/room_music_session";
-const FIELDS = "room,video_id,started_at,paused_position";
+const QUEUE_URL = new URL("rpc/change_room_music_queue", STATE_URL.replace(/room_music_session$/, ""));
+const TRACK_ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
+const FIELDS = "room,video_id,started_at,paused_position,queue,track_id";
 const reply = (body, status = 200) => Response.json(body, {
   status, headers: { "Cache-Control": "no-store" }
 });
@@ -14,7 +16,6 @@ async function stateRequest(env, method, filters, body) {
     headers: {
       apikey: env.SUPABASE_SECRET_KEY.trim(),
       "Content-Type": "application/json",
-      ...(method === "POST" ? { Prefer: "resolution=merge-duplicates,return=representation" } : {}),
       ...(method === "PATCH" ? { Prefer: "return=representation" } : {})
     },
     ...(body ? { body: JSON.stringify(body) } : {})
@@ -45,7 +46,7 @@ export async function onRequestPost({ request, env, waitUntil = () => {} }) {
     const body = await request.json().catch(() => null);
     const room = body?.roomName;
     const action = body?.action;
-    if (!ALLOWED_ROOMS.has(room) || !["state", "play", "stop", "seek", "pause", "resume"].includes(action)) {
+    if (!ALLOWED_ROOMS.has(room) || !["state", "play", "stop", "seek", "pause", "resume", "end", "skip", "clear"].includes(action)) {
       return reply({ error: "Geçersiz müzik komutu veya ses odası." }, 400);
     }
 
@@ -77,6 +78,9 @@ export async function onRequestPost({ request, env, waitUntil = () => {} }) {
         slot: "eq.1", room: `eq.${room}`, video_id: `eq.${currentVideo}`,
         started_at: `eq.${new Date(startedAt).toISOString()}`, select: FIELDS
       });
+      if (typeof body.trackId === "string" && TRACK_ID.test(body.trackId)) {
+        filters.set("track_id", `eq.${body.trackId}`);
+      }
       const session = await stateRequest(env, "PATCH", "?" + filters, {
         started_at: new Date(Date.now() - position * 1000).toISOString(),
         paused_position: action === "pause" || (action === "seek" && body.paused === true) ? position : null
@@ -86,17 +90,30 @@ export async function onRequestPost({ request, env, waitUntil = () => {} }) {
       return reply({ session, now: Date.now() });
     }
 
-    if (action === "stop") {
-      await stateRequest(env, "DELETE", `?slot=eq.1&room=eq.${room}`);
-      notifyRooms(env, [room], waitUntil);
-      return reply({ session: null, now: Date.now() });
+    if (["skip", "clear"].includes(action)) {
+      const role = await roleOf(env.SUPABASE_SECRET_KEY.trim(), user.id);
+      if (!["owner", "admin"].includes(role)) {
+        return reply({ error: "Bu işlemi yalnızca yetkililer yapabilir." }, 403);
+      }
     }
 
-    const session = await stateRequest(env, "POST", `?on_conflict=slot&select=${FIELDS}`, {
-      slot: 1, room, video_id: videoId, started_at: new Date().toISOString(), paused_position: null
+    const trackId = body.trackId;
+    if (["end", "skip"].includes(action) &&
+        (typeof trackId !== "string" || !TRACK_ID.test(trackId))) {
+      return reply({ error: "Geçersiz parça." }, 400);
+    }
+
+    const response = await fetch(QUEUE_URL, {
+      method: "POST",
+      headers: { apikey: env.SUPABASE_SECRET_KEY.trim(), "Content-Type": "application/json" },
+      body: JSON.stringify({ p_action: action, p_room: room, p_video: videoId, p_track: trackId || null })
     });
-    notifyRooms(env, [...ALLOWED_ROOMS], waitUntil);
-    return reply({ session, now: Date.now() });
+    if (!response.ok) throw new Error("Music queue request failed (" + response.status + ")");
+    const result = await response.json();
+    if (result.error === "queue_full") return reply({ error: "Müzik sırası dolu." }, 409);
+    if (result.error) throw new Error(result.error);
+    notifyRooms(env, action === "play" ? [...ALLOWED_ROOMS] : [room], waitUntil);
+    return reply({ session: result.session, now: Date.now() });
   } catch (error) {
     console.error("Music session:", error.message);
     return reply({ error: "Müzik oturumuna şu anda ulaşılamıyor." }, 502);

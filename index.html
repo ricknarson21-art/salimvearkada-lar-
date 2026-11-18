@@ -94,6 +94,10 @@
     .auth-pane input{margin:5px 0 10px}
     .turnstile-holder{display:none;justify-content:center;min-height:65px;margin:12px 0}
     .auth-error{color:#fda4af;font-size:13px;min-height:18px}
+    #music-queue{padding-left:24px;max-height:180px;overflow:auto}
+    #music-queue a{color:#a9c8ff}
+    .voice-settings[hidden]{display:none}
+    .voice-settings{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:10px}
     #music-player iframe{display:block;width:100%;min-height:200px;aspect-ratio:16/9;border:0;margin-top:8px}
     #mute-btn svg{vertical-align:middle}
     .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#20334f;border:1px solid #456080;padding:10px 15px;border-radius:10px;display:none;z-index:200;max-width:min(90vw,600px)}
@@ -136,6 +140,10 @@
           <button id="mute-btn" class="muted-btn" disabled>🎙 Mikrofon kapalı</button>
           <button id="leave-btn" class="danger" disabled>Odadan ayrıl</button>
         </div>
+        <div class="voice-settings">
+          <label><input id="ptt-enabled" type="checkbox"> Bas-konuş</label>
+          <button id="ptt-bind" type="button" class="muted-btn" hidden>Tuş: V</button>
+        </div>
         <p id="voice-status" class="statusline">Henüz sesli odaya katılmadın.</p>
         <form id="music-form" class="chatrow">
           <input id="music-url" type="url" maxlength="2048" aria-label="YouTube bağlantısı" placeholder="https://youtu.be/…" required disabled>
@@ -147,6 +155,14 @@
           <p class="statusline">Tarayıcı otomatik başlatmazsa YouTube oynatıcısındaki oynat düğmesine bas.</p>
           <button id="music-unmute" type="button" hidden>Müziğin sesini aç</button>
           <div id="music-player"></div>
+          <div id="music-queue-section" hidden>
+            <p class="statusline">Müzik sırası</p>
+            <ol id="music-queue"></ol>
+          </div>
+          <div id="music-queue-admin" class="voice-settings" hidden>
+            <button id="music-skip" type="button" class="muted-btn">Sıradaki şarkı</button>
+            <button id="music-clear" type="button" class="muted-btn">Sırayı temizle</button>
+          </div>
         </div>
       </section>
       <section class="card">
@@ -224,6 +240,12 @@ let musicSeekSample = null;
 let musicSeekIgnoreUntil = 0;
 const MUSIC_BOT_ID = "birartibir-room-music";
 let muted = false;
+let pttEnabled = localStorage.getItem("birartibir_ptt")==="on";
+let pttKey = localStorage.getItem("birartibir_ptt_key") || "KeyV";
+let pttLabel = localStorage.getItem("birartibir_ptt_label") || "V";
+let pttBinding = false;
+let pttHeld = false;
+let pttSyncing = false;
 let muteChanging = false;
 let joiningVoice = false;
 let leavingVoice = false;
@@ -578,6 +600,7 @@ function roleName(role){return role==="owner"?"Kurucu":role==="admin"?"Admin":"�
 function renderOwnerPanel(){
   const panel=$("owner-admin-panel");
   panel.hidden=moderationRole!=="owner";
+  renderMusicQueue();
   $("clear-chat-btn").style.display=moderationRole==="owner"||moderationRole==="admin"?"inline-block":"none";
   const label=document.querySelector(".me-info small");
   if(label) label.textContent=(accountType==="registered"?"Kayıtlı hesap":"Misafir hesabı")+
@@ -935,17 +958,47 @@ function notifyIncomingChat(){
   playNotificationSound("message");
 }
 
+function renderMusicQueue(){
+  const queue=musicSession?.queue || [];
+  $("music-queue-section").hidden=!queue.length;
+  $("music-queue-admin").hidden=!musicSession || !["owner","admin"].includes(moderationRole);
+  $("music-clear").disabled=!queue.length || musicCommandPending;
+  $("music-skip").disabled=!queue.length || musicCommandPending;
+  $("music-play").textContent=musicSession ? "Sıraya ekle" : "🎵 Botu çağır";
+  const list=$("music-queue");
+  const key=queue.join(",");
+  if(list.dataset.queue===key) return;
+  list.dataset.queue=key;
+  list.replaceChildren(...queue.map(videoId=>{
+    const item=document.createElement("li");
+    const link=document.createElement("a");
+    link.href="https://www.youtube.com/watch?v="+videoId;
+    link.target="_blank";
+    link.rel="noopener";
+    link.textContent="YouTube · "+videoId;
+    item.appendChild(link);
+    return item;
+  }));
+}
+
 function renderMusicSession(session, serverNow){
-  const key=session ? session.room+"/"+session.video_id+"/"+session.started_at+"/"+session.paused_position : null;
-  if(key===musicSession?.key || (!key && !musicSession)) return;
+  const key=session ? session.room+"/"+session.track_id+"/"+session.video_id+"/"+session.started_at+"/"+session.paused_position : null;
+  if(key===musicSession?.key || (!key && !musicSession)){
+    if(musicSession && JSON.stringify(musicSession.queue)!==JSON.stringify(session.queue)){
+      musicSession.queue=session.queue;
+      renderMusicQueue();
+    }
+    return;
+  }
   const next=session ? {
-    key, videoId:session.video_id, startedAt:session.started_at, pausedPosition:session.paused_position ?? null,
+    key, trackId:session.track_id, queue:session.queue || [], videoId:session.video_id, startedAt:session.started_at, pausedPosition:session.paused_position ?? null,
     age:Math.max(0,serverNow-Date.parse(session.started_at)), receivedAt:performance.now()
   } : null;
-  if(next && musicSession?.videoId===next.videoId){
+  if(next && musicSession?.trackId===next.trackId && musicSession?.videoId===next.videoId){
     const pauseChanged=(musicSession.pausedPosition===null)!==(next.pausedPosition===null);
     Object.assign(musicSession,next);
     if(musicPlayerReady) applyMusicPlayback(musicYouTubePlayer,musicSession,pauseChanged);
+    renderMusicQueue();
     return;
   }
   musicSession=next;
@@ -960,6 +1013,7 @@ function renderMusicSession(session, serverNow){
   $("music-player").replaceChildren();
   $("music-session").hidden=!musicSession;
   $("music-stop").disabled=!musicSession || musicCommandPending;
+  renderMusicQueue();
   if(musicSession) openMusicPlayer();
   renderSidebarVoiceUsers();
 }
@@ -984,7 +1038,7 @@ function applyMusicPlayback(player,session,toggle=true){
 
 function musicPositionCommand(action,session,position){
   void sendMusicCommand(action,{
-    videoId:session.videoId,startedAt:session.startedAt,position,paused:session.pausedPosition!==null
+    videoId:session.videoId,trackId:session.trackId,startedAt:session.startedAt,position,paused:session.pausedPosition!==null
   });
 }
 
@@ -1064,6 +1118,11 @@ function openMusicPlayer(){
         },
         onStateChange:({data,target})=>{
           if(session!==musicSession || !musicPlayerReady) return;
+          if(data===api.PlayerState.ENDED){
+            if(musicCommandPending && musicScope) musicScope.endedTrack=session.trackId;
+            else void sendMusicCommand("end",{trackId:session.trackId});
+            return;
+          }
           if(data===api.PlayerState.PAUSED && aligned && session.pausedPosition===null && !musicCommandPending){
             musicPositionCommand("pause",session,target.getCurrentTime());
           }
@@ -1095,7 +1154,7 @@ async function musicRequest(action,scope,details,signal){
     body:JSON.stringify({action,roomName:scope.roomName,...details})
   });
   const result=await response.json().catch(()=>({}));
-  if(response.status===401 || response.status===403){
+  if(response.status===401 || (response.status===403 && action==="state")){
     if(scope===musicScope) renderMusicSession(null);
   }
   if(!response.ok) throw new Error(result.error||"Müzik komutu başarısız.");
@@ -1141,7 +1200,11 @@ async function sendMusicCommand(action,details={url:$("music-url").value.trim()}
     if(scope===musicScope){
       musicCommandPending=false;
       renderVoiceButtons();
-      void refreshMusicSession();
+      const ended=scope.endedTrack;
+      scope.endedTrack=null;
+      if(ended && ended===musicSession?.trackId && musicSession.pausedPosition===null){
+        void sendMusicCommand("end",{trackId:ended});
+      }else void refreshMusicSession();
     }
   }
 }
@@ -1156,7 +1219,7 @@ function syncMusicScope(connected){
   musicPollPending=false;
   renderMusicSession(null);
   if(connected){
-    musicScope={room:livekitRoom,roomName:selectedRoom,controller:new AbortController(),revision:0};
+    musicScope={room:livekitRoom,roomName:selectedRoom,controller:new AbortController(),revision:0,endedTrack:null};
     musicPollTimer=setInterval(refreshMusicSession,4000);
     void refreshMusicSession();
   }
@@ -1170,9 +1233,15 @@ function renderVoiceButtons(){
   $("music-play").disabled=!musicConnected || musicCommandPending;
   $("music-stop").disabled=!musicConnected || musicCommandPending || !musicSession;
   $("join-btn").disabled=connected || joiningVoice || leavingVoice || roomChanging;
-  $("mute-btn").disabled=!connected || muteChanging || joiningVoice || leavingVoice;
+  $("mute-btn").disabled=!connected || pttEnabled || muteChanging || joiningVoice || leavingVoice;
+  $("ptt-enabled").checked=pttEnabled;
+  $("ptt-enabled").disabled=muteChanging || joiningVoice || leavingVoice;
+  $("ptt-bind").hidden=!pttEnabled;
+  $("ptt-bind").textContent=pttBinding ? "Bir tuşa bas…" : "Tuş: "+pttLabel;
+  renderMusicQueue();
   $("leave-btn").disabled=!connected || muteChanging || joiningVoice || leavingVoice;
-  $("mute-btn").innerHTML=connected && muted
+  $("mute-btn").innerHTML=connected && pttEnabled ? (muted ? "🎙 Bas-konuş bekliyor" : "🎙 Konuşuyorsun")
+    : connected && muted
     ? mutedMicIconSvg()+" Mikrofonu aç"
     : connected ? "🎙 Mikrofonu kapat" : "🎙 Mikrofon kapalı";
 }
@@ -1184,6 +1253,7 @@ function removeRemoteAudio(){
 function resetVoiceUi(message,room){
   if(room && room!==livekitRoom) return;
   livekitRoom=null;
+  pttHeld=false;
   muted=false;
   muteChanging=false;
   joiningVoice=false;
@@ -1224,6 +1294,7 @@ async function joinVoice(){
       room.on(LivekitClient.RoomEvent.Moved,async newRoom=>{
         if(activeRoom!==livekitRoom || !MOD_ROOMS[newRoom]) return;
         void publishVoiceState(false); // Eski odadan ayrıldığını bildir.
+        releasePushTalk();
         selectedRoom=newRoom;
         renderVoiceButtons();
         activeSpeakerIds.clear();
@@ -1245,6 +1316,7 @@ async function joinVoice(){
         const source=String(publication?.source||"").toLowerCase();
         const own=participant?.identity===currentUser?.id || participant===room.localParticipant;
         if(own && source.includes("microphone") && !muteChanging && activeRoom===livekitRoom){
+          pttHeld=false;
           muted=true;renderVoiceButtons();renderSidebarVoiceUsers();
           void publishVoiceState(true);
           toast("Mikrofonun yetkili tarafından susturuldu.");
@@ -1311,8 +1383,8 @@ async function joinVoice(){
     await room.connect(result.serverUrl,result.token);
     livekitRoom=room;
     try{
-      await room.localParticipant.setMicrophoneEnabled(true);
-      muted=false;
+      await room.localParticipant.setMicrophoneEnabled(!pttEnabled);
+      muted=pttEnabled;
     }catch(error){
       muted=true;
       console.warn("Mikrofon açılamadı:",error);
@@ -1348,20 +1420,23 @@ function mutedMicIconSvg(){
     <path d="M7 56L57 8" stroke="#ef3038" stroke-width="7" stroke-linecap="round"/>
   </svg>`;
 }
-async function toggleMute(){
+function toggleMute(){
+  if(!pttEnabled) return setVoiceMicrophone(muted);
+}
+
+async function setVoiceMicrophone(enabled){
   const room=livekitRoom;
   if(!room || muteChanging || joiningVoice || leavingVoice) return;
   muteChanging=true;
   renderVoiceButtons();
-  const previous=muted;
   try{
-    // Önceki durum muted ise mikrofonu aç (true), değilse kapat (false).
-    await room.localParticipant.setMicrophoneEnabled(previous);
+    await room.localParticipant.setMicrophoneEnabled(enabled);
     if(room!==livekitRoom) return;
-    muted=!previous;
+    muted=!enabled;
     renderSidebarVoiceUsers();
     renderVoiceButtons();
     void publishVoiceState(true);
+    return true;
   }catch(error){
     console.error("Mikrofon değiştirme hatası:",error);
     toast("Mikrofon hatası: "+error.message);
@@ -1370,6 +1445,48 @@ async function toggleMute(){
     renderVoiceButtons();
   }
 }
+async function syncPushTalk(){
+  if(pttSyncing) return;
+  pttSyncing=true;
+  try{
+    const room=livekitRoom;
+    while(pttEnabled && room && room===livekitRoom && !joiningVoice && !leavingVoice && muted===pttHeld){
+      if(!await setVoiceMicrophone(pttHeld)) break;
+    }
+  }finally{
+    pttSyncing=false;
+  }
+}
+
+function releasePushTalk(){
+  if(!pttHeld) return;
+  pttHeld=false;
+  void syncPushTalk();
+}
+
+function handlePushTalkKey(event){
+  if(pttBinding){
+    if(event.repeat || /^(Shift|Control|Alt|Meta)(Left|Right)$/.test(event.code)) return;
+    event.preventDefault();
+    pttBinding=false;
+    if(event.code!=="Escape" && event.code){
+      pttKey=event.code;
+      pttLabel=event.code==="Space" ? "Boşluk" : event.key.toLocaleUpperCase("tr");
+      localStorage.setItem("birartibir_ptt_key",pttKey);
+      localStorage.setItem("birartibir_ptt_label",pttLabel);
+    }
+    renderVoiceButtons();
+    return;
+  }
+  const editing=event.target?.closest?.("input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select, [contenteditable]");
+  if(!pttEnabled || !livekitRoom || joiningVoice || leavingVoice || editing || event.ctrlKey ||
+      event.altKey || event.metaKey || event.code!==pttKey) return;
+  event.preventDefault();
+  if(event.repeat) return;
+  pttHeld=true;
+  void syncPushTalk();
+}
+
 async function leaveVoice(){
   if(leavingVoice || joiningVoice || muteChanging) return;
   if(!livekitRoom){
@@ -1377,6 +1494,7 @@ async function leaveVoice(){
     return;
   }
   leavingVoice=true;
+  pttHeld=false;
   renderVoiceButtons();
   const room=livekitRoom;
   livekitRoom=null;
@@ -1495,6 +1613,28 @@ $("music-unmute").addEventListener("click",()=>{
 document.addEventListener("visibilitychange",()=>{
   if(!document.hidden) void refreshMusicSession();
 });
+$("music-skip").addEventListener("click",()=>void sendMusicCommand("skip",{trackId:musicSession?.trackId}));
+$("music-clear").addEventListener("click",()=>void sendMusicCommand("clear"));
+$("ptt-enabled").addEventListener("change",event=>{
+  const wasHeld=pttHeld;
+  pttEnabled=event.target.checked;
+  pttHeld=false;
+  pttBinding=false;
+  localStorage.setItem("birartibir_ptt",pttEnabled ? "on" : "off");
+  renderVoiceButtons();
+  if(pttEnabled) void syncPushTalk();
+  else if(wasHeld && !muted) void setVoiceMicrophone(false);
+});
+$("ptt-bind").addEventListener("click",()=>{
+  pttBinding=true;
+  releasePushTalk();
+  renderVoiceButtons();
+});
+window.addEventListener("keydown",handlePushTalkKey);
+window.addEventListener("keyup",event=>{if(event.code===pttKey) releasePushTalk();});
+window.addEventListener("blur",releasePushTalk);
+document.addEventListener("visibilitychange",()=>{if(document.hidden) releasePushTalk();});
+renderVoiceButtons();
 $("music-stop").addEventListener("click",()=>void sendMusicCommand("stop"));
 $("join-btn").addEventListener("click",joinVoice);
 $("mute-btn").addEventListener("click",toggleMute);
