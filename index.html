@@ -26,6 +26,8 @@
     .sidebar-person{display:flex;align-items:center;gap:9px;padding:10px;background:var(--panel2);border-radius:9px;overflow-wrap:anywhere}.sidebar-person.speaking,.online-person.speaking{outline:2px solid var(--green);box-shadow:0 0 14px #34d39966}.room-hint{font-size:12px;color:var(--muted);margin:0 0 8px}
     .avatar{width:34px;height:34px;flex:0 0 34px;border-radius:50%;background:#3566b5;display:grid;place-items:center;font-weight:bold;color:#fff}
     .sidebar-person .avatar{width:28px;height:28px;flex-basis:28px;font-size:12px}
+    .mic-status{display:inline-flex;align-items:center;justify-content:center;width:27px;min-width:27px;margin-left:auto}
+    .mic-status svg{display:block}
     .empty{color:var(--muted);font-size:13px;padding:8px 2px}
     .side-bottom{margin-top:auto;padding-top:18px}
     .me{display:flex;align-items:center;gap:9px;min-width:0}
@@ -136,7 +138,16 @@ let chatChannel = null;
 let livekitRoom = null;
 let muted = false;
 let muteChanging = false;
+let joiningVoice = false;
 let leavingVoice = false;
+let roomChanging = false;
+let voiceMembers = new Map();
+let voiceLastEvents = new Map();
+let voiceEventSequence = 0;
+const voiceSessionId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+let voiceHeartbeatTimer = null;
+let voiceChannelVersion = 0;
+let remoteAudioElements = new Set();
 let selectedRoom = "genel";
 let activeSpeakerIds = new Set();
 
@@ -155,20 +166,11 @@ function showApp(){
   setText("connection-state","Bağlandı");
 }
 function uniquePresencePeople(channel){
-  const state = channel?.presenceState?.() || {};
-  const people = new Map();
-
-  // Aynı kullanıcıya ait birden fazla Presence kaydı varsa en yeni durumu seç.
-  for (const metas of Object.values(state)) {
-    if (!Array.isArray(metas)) continue;
-    for (const person of metas) {
-      if (!person || !person.user_id) continue;
-      const previous = people.get(person.user_id);
-      const personTime = Number(person.updated_at) || 0;
-      const previousTime = Number(previous?.updated_at) || 0;
-      if (!previous || personTime >= previousTime) {
-        people.set(person.user_id, person);
-      }
+  const people=new Map();
+  for(const metas of Object.values(channel?.presenceState?.() || {})){
+    if(!Array.isArray(metas)) continue;
+    for(const person of metas){
+      if(person?.user_id) people.set(person.user_id,person);
     }
   }
   return [...people.values()];
@@ -200,25 +202,114 @@ function renderOnlineUsers(){
 }
 
 // Her ses odasının kendi Supabase Presence kanalı vardır.
+// Ses odası üyeliği ve mikrofon bilgisi Broadcast ile iletilir.
+// Presence'a her aç/kapat için track() atmak, Supabase hız sınırında kanalı kapatır.
+function clearVoiceHeartbeat(){
+  if(voiceHeartbeatTimer!==null){clearInterval(voiceHeartbeatTimer);voiceHeartbeatTimer=null;}
+}
+function expireVoiceMembers(){
+  const now=Date.now();
+  let changed=false;
+  for(const [id,item] of voiceMembers){
+    if(now-item.lastSeen>65000){voiceMembers.delete(id);changed=true;}
+  }
+  if(changed) renderSidebarVoiceUsers();
+}
+function updateVoiceMember(payload){
+  if(!payload || typeof payload.user_id!=="string" || typeof payload.username!=="string" ||
+     typeof payload.joined!=="boolean" || typeof payload.room_name!=="string") return;
+  if(payload.room_name!==selectedRoom || payload.user_id.length>128 || payload.username.length>30) return;
+  const id=payload.user_id;
+  const previous=voiceLastEvents.get(id);
+  const sequence=Number(payload.sequence)||0;
+  const sentAt=Number(payload.sent_at)||0;
+  const session=String(payload.session||"");
+  if(previous){
+    // Aynı istemciden gelen eski paketlerin yeni bilgiyi geri almasını engelle.
+    if(session===previous.session && sequence<previous.sequence) return;
+    if(session!==previous.session && sentAt<previous.sentAt) return;
+  }
+  voiceLastEvents.set(id,{session,sequence,sentAt});
+  if(payload.joined){
+    voiceMembers.set(id,{
+      user_id:id,username:payload.username,muted:Boolean(payload.muted),
+      lastSeen:Date.now()
+    });
+  }else voiceMembers.delete(id);
+  renderSidebarVoiceUsers();
+}
+async function publishVoiceState(joined=Boolean(livekitRoom)){
+  const channel=voicePresenceChannel;
+  if(!channel || !currentUser) return;
+  const payload={
+    user_id:currentUser.id,
+    username:currentUsername,
+    room_name:selectedRoom,
+    joined:Boolean(joined),
+    muted:Boolean(muted),
+    session:voiceSessionId,
+    sequence:++voiceEventSequence,
+    sent_at:Date.now()
+  };
+  updateVoiceMember(payload);
+  try{
+    const result=await channel.send({type:"broadcast",event:"voice-state",payload});
+    if(result!=="ok") console.warn("Ses durumu gönderimi:",result);
+  }catch(error){console.warn("Ses durumu gönderilemedi:",error);}
+}
 async function subscribeVoicePresence(roomName=selectedRoom){
   if(!currentUser) return;
-  if(voicePresenceChannel) await db.removeChannel(voicePresenceChannel);
-  voicePresenceChannel=db.channel("voice-room-"+roomName,{config:{presence:{key:currentUser.id}}});
-  voicePresenceChannel.on("presence",{event:"sync"},renderSidebarVoiceUsers);
-  await subscribeAndWait(voicePresenceChannel,"Ses odası listesi");
+  const generation=++voiceChannelVersion;
+  clearVoiceHeartbeat();
+  const oldChannel=voicePresenceChannel;
+  voicePresenceChannel=null;
+  voiceMembers.clear();
+  voiceLastEvents.clear();
+  if(oldChannel) await db.removeChannel(oldChannel);
+  if(generation!==voiceChannelVersion) return;
+
+  const channel=db.channel("voice-room-"+roomName);
+  voicePresenceChannel=channel;
+  channel.on("broadcast",{event:"voice-state"},({payload})=>{
+    if(channel!==voicePresenceChannel) return;
+    updateVoiceMember(payload);
+  });
+  channel.on("broadcast",{event:"voice-who"},()=>{
+    if(channel===voicePresenceChannel && selectedRoom===roomName && livekitRoom && !leavingVoice){
+      void publishVoiceState(true);
+    }
+  });
+  await subscribeAndWait(channel,"Ses odası listesi");
+  if(channel!==voicePresenceChannel) return;
+  // Sayfaya yeni gelen kişi, odadakilerden güncel durumu ister.
+  void channel.send({type:"broadcast",event:"voice-who",payload:{}}).catch(console.warn);
+  voiceHeartbeatTimer=setInterval(()=>{
+    if(channel!==voicePresenceChannel) return;
+    if(livekitRoom && !leavingVoice) void publishVoiceState(true);
+    expireVoiceMembers();
+  },20000);
   renderSidebarVoiceUsers();
 }
 
 async function selectRoom(roomName){
   if(!["genel","oyun","muhabbet"].includes(roomName)) return;
-  if(livekitRoom){toast("Önce bulunduğun ses odasından ayrılmalısın.");return;}
+  if(livekitRoom || joiningVoice || leavingVoice || muteChanging || roomChanging){
+    toast("Önce bulunduğun ses odasından ayrılmalısın.");return;
+  }
+  if(roomName===selectedRoom) return;
+  roomChanging=true;
   selectedRoom=roomName;
   const labels={genel:"Genel",oyun:"Oyun",muhabbet:"Muhabbet"};
   setText("selected-room-label",labels[roomName]);
   setText("voice-heading","🔊 "+labels[roomName]+" ses odası");
   document.querySelectorAll("[data-room]").forEach(button=>button.classList.toggle("active",button.dataset.room===roomName));
-  await subscribeVoicePresence(roomName);
-  setText("voice-status",labels[roomName]+" odası seçildi. Katılmaya hazırsın.");
+  try{
+    await subscribeVoicePresence(roomName);
+    setText("voice-status",labels[roomName]+" odası seçildi. Katılmaya hazırsın.");
+  }catch(error){
+    console.error("Oda listesi bağlanamadı:",error);
+    toast("Oda listesine bağlanılamadı. Sayfayı yenileyebilirsin.");
+  }finally{roomChanging=false;}
 }
 
 async function subscribeAndWait(channel,label){
@@ -233,50 +324,52 @@ async function subscribeAndWait(channel,label){
   });
 }
 
+function remoteMicMuted(participant){
+  const source=LivekitClient.Track?.Source?.Microphone || "microphone";
+  const publication=participant.getTrackPublication?.(source);
+  // Yayın yoksa mikrofon açık değildir.
+  return publication ? Boolean(publication.isMuted) : true;
+}
 function renderSidebarVoiceUsers(){
-  const box=$("sidebar-voice-users");
-  if(!box) return;
-
-  box.replaceChildren();
-
-  const people=uniquePresencePeople(voicePresenceChannel);
-
-  setText("voice-count","("+people.length+")");
-
-  if(!people.length){
-    box.innerHTML='<div class="empty">Henüz kimse katılmadı.</div>';
-    return;
+  const box=$("sidebar-voice-users");if(!box) return;
+  const people=new Map();
+  const now=Date.now();
+  if(livekitRoom && currentUser){
+    // Bağlıyken LiveKit, oda katılımcılarının asıl kaynağıdır.
+    people.set(currentUser.id,{user_id:currentUser.id,username:currentUsername,muted});
+    const onlineNames=new Map(uniquePresencePeople(onlineChannel).map(p=>[p.user_id,p.username]));
+    for(const participant of livekitRoom.remoteParticipants.values()){
+      const id=participant.identity;
+      if(!id) continue;
+      const known=voiceMembers.get(id);
+      people.set(id,{
+        user_id:id,
+        username:known?.username || onlineNames.get(id) || participant.name || "Arkadaş",
+        muted:remoteMicMuted(participant)
+      });
+    }
+  }else{
+    // Odaya girmeyen kullanıcılar, Broadcast üzerinden güncel listeyi görür.
+    for(const [id,person] of voiceMembers){
+      if(now-person.lastSeen<=65000) people.set(id,person);
+    }
   }
-
-  people.sort((a,b)=>
-    (a.username||"").localeCompare(b.username||"","tr")
-  );
-
-  for(const person of people){
+  const list=[...people.values()].sort((a,b)=>(a.username||"").localeCompare(b.username||"","tr"));
+  setText("voice-count","("+list.length+")");
+  box.replaceChildren();
+  if(!list.length){box.innerHTML='<div class="empty">Henüz kimse katılmadı.</div>';return;}
+  for(const person of list){
     const row=document.createElement("div");
-
-    row.className="sidebar-person"+
-      (activeSpeakerIds.has(person.user_id)?" speaking":"");
-
-    const avatar=document.createElement("div");
-    avatar.className="avatar";
+    row.className="sidebar-person"+(activeSpeakerIds.has(person.user_id)?" speaking":"");
+    const avatar=document.createElement("div");avatar.className="avatar";
     avatar.textContent=initials(person.username);
-
-    const name=document.createElement("strong");
-    name.textContent=person.username||"Misafir";
-
-    const mic=document.createElement("span");
-mic.innerHTML = person.muted
-  ? mutedMicIconSvg()
-  : "🎙️";
+    const name=document.createElement("strong");name.textContent=person.username||"Arkadaş";
+    const mic=document.createElement("span");mic.className="mic-status";
+    mic.innerHTML=person.muted ? mutedMicIconSvg() : "🎙️";
     mic.title=person.muted ? "Mikrofon kapalı" : "Mikrofon açık";
-    mic.style.marginLeft="auto";
-
-    row.append(avatar,name,mic);
-    box.append(row);
+    row.append(avatar,name,mic);box.append(row);
   }
 }
-
 
 async function login(){
   const name=$("guest-name").value.trim();
@@ -325,11 +418,39 @@ async function restoreSession(){
   }catch(error){console.error("Oturum geri yüklenemedi:",error);}
 }
 
+function renderVoiceButtons(){
+  const connected=Boolean(livekitRoom);
+  $("join-btn").disabled=connected || joiningVoice || leavingVoice || roomChanging;
+  $("mute-btn").disabled=!connected || muteChanging || joiningVoice || leavingVoice;
+  $("leave-btn").disabled=!connected || muteChanging || joiningVoice || leavingVoice;
+  $("mute-btn").innerHTML=connected && muted
+    ? mutedMicIconSvg()+" Mikrofonu aç"
+    : connected ? "🎙 Mikrofonu kapat" : "🎙 Mikrofon kapalı";
+}
+function removeRemoteAudio(){
+  for(const element of remoteAudioElements) element.remove();
+  remoteAudioElements.clear();
+}
+function resetVoiceUi(message,room){
+  if(room && room!==livekitRoom) return;
+  livekitRoom=null;
+  muted=false;
+  muteChanging=false;
+  joiningVoice=false;
+  activeSpeakerIds.clear();
+  removeRemoteAudio();
+  renderVoiceButtons();
+  setText("voice-status",message);
+  void publishVoiceState(false);
+  renderSidebarVoiceUsers();
+}
 async function joinVoice(){
   if(!currentUser){toast("Önce giriş yapmalısın.");return;}
-  if(livekitRoom) return;
-  const btn=$("join-btn"); btn.disabled=true;
+  if(livekitRoom || joiningVoice || leavingVoice || roomChanging) return;
+  joiningVoice=true;
+  renderVoiceButtons();
   setText("voice-status","Ses odasına bağlanılıyor…");
+  let room=null;
   try{
     const {data:{session},error}=await db.auth.getSession();
     if(error) throw error;
@@ -341,52 +462,69 @@ async function joinVoice(){
     });
     const result=await response.json();
     if(!response.ok) throw new Error(result.error||"Ses bağlantısı kurulamadı.");
-
-    livekitRoom=new LivekitClient.Room();
-    livekitRoom.on(LivekitClient.RoomEvent.TrackSubscribed,track=>{
+    room=new LivekitClient.Room();
+    const activeRoom=room;
+    room.on(LivekitClient.RoomEvent.TrackSubscribed,track=>{
       if(track.kind==="audio"){
-        const audio=track.attach(); audio.autoplay=true; document.body.appendChild(audio);
+        const audio=track.attach();audio.autoplay=true;
+        remoteAudioElements.add(audio);document.body.appendChild(audio);
       }
     });
-    livekitRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed,track=>{
-      track.detach().forEach(element=>element.remove());
+    room.on(LivekitClient.RoomEvent.TrackUnsubscribed,track=>{
+      track.detach().forEach(element=>{
+        remoteAudioElements.delete(element);element.remove();
+      });
     });
-    livekitRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{
-      if(!leavingVoice) resetVoiceUi("Ses bağlantısı kesildi.");
+    room.on(LivekitClient.RoomEvent.Disconnected,()=>{
+      if(activeRoom===livekitRoom && !leavingVoice){
+        resetVoiceUi("Ses bağlantısı kesildi.",activeRoom);
+      }
     });
-    livekitRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,speakers=>{
+    room.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,speakers=>{
+      if(activeRoom!==livekitRoom) return;
       activeSpeakerIds=new Set(speakers.map(participant=>participant.identity));
       renderSidebarVoiceUsers();
     });
-
-    await livekitRoom.connect(result.serverUrl,result.token);
-    await livekitRoom.localParticipant.setMicrophoneEnabled(true);
-    muted=false;
-    if(voicePresenceChannel){
-      const presenceStatus=await voicePresenceChannel.track({
-  user_id:currentUser.id,
-  username:currentUsername,
-  room_name:selectedRoom,
-  muted:false,
-  updated_at:Date.now()
-});
-      if(presenceStatus && presenceStatus!=="ok") console.warn("Ses odası Presence track sonucu:",presenceStatus);
+    for(const name of [
+      "ParticipantConnected","ParticipantDisconnected","TrackMuted",
+      "TrackUnmuted","TrackPublished","TrackUnpublished"
+    ]){
+      const event=LivekitClient.RoomEvent[name];
+      if(event) room.on(event,()=>{
+        if(activeRoom===livekitRoom) renderSidebarVoiceUsers();
+      });
     }
-    $("mute-btn").disabled=false;
-    $("leave-btn").disabled=false;
-    $("mute-btn").textContent="🎙 Mikrofonu kapat";
+    await room.connect(result.serverUrl,result.token);
+    livekitRoom=room;
+    try{
+      await room.localParticipant.setMicrophoneEnabled(true);
+      muted=false;
+    }catch(error){
+      muted=true;
+      console.warn("Mikrofon açılamadı:",error);
+      toast("Mikrofon izni verilmedi; odaya dinleyici olarak katıldın.");
+    }
+    joiningVoice=false;
+    renderVoiceButtons();
     setText("voice-status",({genel:"Genel",oyun:"Oyun",muhabbet:"Muhabbet"}[selectedRoom])+" odasına katıldın!");
     renderSidebarVoiceUsers();
+    void publishVoiceState(true);
     toast("Sesli odaya katıldın!");
   }catch(error){
-    console.error(error);
-    if(livekitRoom){try{await livekitRoom.disconnect();}catch{} livekitRoom=null;}
+    console.error("Ses odasına giriş hatası:",error);
+    if(room){try{await room.disconnect();}catch{}}
+    if(livekitRoom===room) livekitRoom=null;
+    muted=false;
+    joiningVoice=false;
+    removeRemoteAudio();
     setText("voice-status","Hata: "+error.message);
     toast("Ses bağlantısı: "+error.message);
   }finally{
-    btn.disabled=!!livekitRoom;
+    joiningVoice=false;
+    renderVoiceButtons();
   }
 }
+
 function mutedMicIconSvg(){
   return `<svg width="25" height="25" viewBox="0 0 64 64">
     <rect x="23" y="5" width="18" height="35" rx="9" fill="currentColor"/>
@@ -396,72 +534,55 @@ function mutedMicIconSvg(){
   </svg>`;
 }
 async function toggleMute(){
-  if(!livekitRoom || muteChanging) return;
-
-  const button = $("mute-btn");
-  const previousMuted = muted;
-  const nextMuted = !previousMuted;
-
-  muteChanging = true;
-  button.disabled = true;
-
+  const room=livekitRoom;
+  if(!room || muteChanging || joiningVoice || leavingVoice) return;
+  muteChanging=true;
+  renderVoiceButtons();
+  const previous=muted;
   try{
-    await livekitRoom.localParticipant.setMicrophoneEnabled(!nextMuted);
-    muted = nextMuted;
-
-    button.innerHTML = muted
-      ? mutedMicIconSvg() + " Mikrofonu aç"
-      : "🎙 Mikrofonu kapat";
-
-    if(voicePresenceChannel && currentUser){
-      const presenceStatus = await voicePresenceChannel.track({
-        user_id:currentUser.id,
-        username:currentUsername,
-        room_name:selectedRoom,
-        muted:muted,
-        updated_at:Date.now()
-      });
-
-      if(presenceStatus && presenceStatus !== "ok"){
-        console.warn("Mikrofon durumu Presence'a gönderilemedi:", presenceStatus);
-      }
-    }
-
+    // Önceki durum muted ise mikrofonu aç (true), değilse kapat (false).
+    await room.localParticipant.setMicrophoneEnabled(previous);
+    if(room!==livekitRoom) return;
+    muted=!previous;
     renderSidebarVoiceUsers();
+    renderVoiceButtons();
+    void publishVoiceState(true);
   }catch(error){
-    muted = previousMuted;
-    button.innerHTML = muted
-      ? mutedMicIconSvg() + " Mikrofonu aç"
-      : "🎙 Mikrofonu kapat";
-    toast("Mikrofon durumu güncellenemedi: "+error.message);
-    console.error("Mute güncelleme hatası:", error);
+    console.error("Mikrofon değiştirme hatası:",error);
+    toast("Mikrofon hatası: "+error.message);
   }finally{
-    muteChanging = false;
-    button.disabled = !livekitRoom;
+    muteChanging=false;
+    renderVoiceButtons();
   }
 }
-
-
 async function leaveVoice(){
-  if(leavingVoice) return;
+  if(leavingVoice || joiningVoice || muteChanging) return;
+  if(!livekitRoom){
+    renderVoiceButtons();
+    return;
+  }
   leavingVoice=true;
+  renderVoiceButtons();
+  const room=livekitRoom;
+  livekitRoom=null;
+  muted=false;
+  activeSpeakerIds.clear();
   try{
-    if(livekitRoom){
-      const room=livekitRoom; livekitRoom=null;
-      await room.disconnect();
-    }
-    if(voicePresenceChannel) await voicePresenceChannel.untrack();
-    activeSpeakerIds.clear();
-    muted=false;
-    $("join-btn").disabled=false; $("mute-btn").disabled=true; $("leave-btn").disabled=true;
-    $("mute-btn").textContent="🎙 Mikrofon kapalı";
+    await room.disconnect();
+  }catch(error){
+    console.warn("Odadan çıkış hatası:",error);
+  }finally{
+    removeRemoteAudio();
+    // Sunucu bağlantısı kesilse bile arayüzü tekrar kullanıma aç.
+    void publishVoiceState(false);
+    leavingVoice=false;
+    renderVoiceButtons();
     setText("voice-status","Odadan ayrıldın.");
     renderSidebarVoiceUsers();
     toast("Sesli odadan ayrıldın.");
-  }catch(error){
-    console.error(error); toast("Odadan ayrılırken hata: "+error.message);
-  }finally{leavingVoice=false;}
+  }
 }
+
 
 function timeLabel(value){
   try{return new Date(value).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});}
@@ -525,6 +646,8 @@ document.querySelectorAll("[data-room]").forEach(button=>button.addEventListener
 
 // Sekme kapanırken Presence bağlantısı kesilir; Supabase Presence de bağlantı kaybını temizler.
 window.addEventListener("pagehide",()=>{
+  clearVoiceHeartbeat();
+  if(livekitRoom) void publishVoiceState(false);
   try{if(livekitRoom) livekitRoom.disconnect();}catch{}
 });
 
