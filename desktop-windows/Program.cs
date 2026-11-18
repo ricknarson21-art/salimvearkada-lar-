@@ -30,9 +30,11 @@ internal sealed class DesktopWindow : Form
     private readonly Timer keyboardTimer = new() { Interval = 20 };
     private readonly JavaScriptSerializer json = new();
     private readonly PushToTalk pushToTalk;
+    private const int OverlayHotkey = 101;
     private readonly VoiceOverlay overlay = new();
+    private OverlaySettings overlayAppearance = OverlaySettings.Load();
     private OverlaySnapshot? overlaySnapshot;
-    private readonly ToolStripMenuItem overlaySetting = new("Oyun göstergesi") { Checked = true, CheckOnClick = true };
+    private readonly ToolStripMenuItem overlaySetting = new("Oyun göstergesi") { CheckOnClick = true, ShortcutKeyDisplayString = "Ctrl+Shift+F10" };
     private int overlayLastUpdate;
     private CoreWebView2? web;
     private bool? microphoneAllowed;
@@ -46,11 +48,24 @@ internal sealed class DesktopWindow : Form
         var menu = new MenuStrip();
         var viewMenu = new ToolStripMenuItem("Görünüm");
         viewMenu.DropDownItems.Add(overlaySetting);
+        var overlayOptions = new ToolStripMenuItem("Gösterge ayarları…");
+        overlayOptions.Click += (_, _) => EditOverlaySettings();
+        viewMenu.DropDownItems.Add(overlayOptions);
         menu.Items.Add(viewMenu);
         MainMenuStrip = menu;
         Controls.Add(webView);
         Controls.Add(menu);
-        overlaySetting.CheckedChanged += (_, _) => RefreshOverlay(force: true);
+        overlaySetting.Checked = overlayAppearance.Enabled;
+        overlay.SetAppearance(overlayAppearance);
+        overlaySetting.CheckedChanged += (_, _) =>
+        {
+            if (overlayAppearance.Enabled != overlaySetting.Checked)
+            {
+                overlayAppearance.Enabled = overlaySetting.Checked;
+                overlayAppearance.Save();
+            }
+            RefreshOverlay(force: true);
+        };
         pushToTalk = new PushToTalk(PostPushToTalk);
         keyboardTimer.Tick += (_, _) =>
         {
@@ -138,6 +153,41 @@ internal sealed class DesktopWindow : Form
                 Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             Close();
         }
+    }
+
+    protected override void OnHandleCreated(EventArgs args)
+    {
+        base.OnHandleCreated(args);
+        RegisterHotKey(Handle, OverlayHotkey, 0x4006, 0x79); // Ctrl + Shift + F10, no repeat.
+    }
+
+    protected override void OnHandleDestroyed(EventArgs args)
+    {
+        UnregisterHotKey(Handle, OverlayHotkey);
+        base.OnHandleDestroyed(args);
+    }
+
+    protected override void WndProc(ref Message message)
+    {
+        if (message.Msg == 0x0312 && message.WParam.ToInt32() == OverlayHotkey)
+        {
+            overlaySetting.Checked = !overlaySetting.Checked;
+            return;
+        }
+        base.WndProc(ref message);
+    }
+
+    private void EditOverlaySettings()
+    {
+        using var dialog = new OverlaySettingsDialog(overlayAppearance);
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        overlayAppearance = dialog.Result;
+        overlay.SetAppearance(overlayAppearance);
+        overlaySetting.Checked = overlayAppearance.Enabled;
+        if (!overlayAppearance.Save())
+            MessageBox.Show(this, "Gösterge ayarları kaydedilemedi.", Text, MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+        RefreshOverlay(force: true);
     }
 
     private void ClearPageState()
@@ -237,6 +287,14 @@ internal sealed class DesktopWindow : Form
     {
         internal int Left, Top, Right, Bottom;
     }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RegisterHotKey(IntPtr window, int id, uint modifiers, uint key);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool UnregisterHotKey(IntPtr window, int id);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
