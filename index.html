@@ -99,6 +99,11 @@
     .voice-settings[hidden]{display:none}
     .voice-settings{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:10px}
     #music-player iframe{display:block;width:100%;min-height:200px;aspect-ratio:16/9;border:0;margin-top:8px}
+    .audio-devices{margin-top:10px}
+    .audio-devices summary{cursor:pointer}
+    .audio-device-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin:8px 0}
+    .audio-device-grid label{display:grid;gap:4px;min-width:0}
+    .audio-device-grid select{width:100%;padding:8px;color:inherit;background:#20334f;border:1px solid #456080;border-radius:8px}
     #mute-btn svg{vertical-align:middle}
     .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#20334f;border:1px solid #456080;padding:10px 15px;border-radius:10px;display:none;z-index:200;max-width:min(90vw,600px)}
     @media(max-width:700px){.sidebar{width:190px;flex-basis:190px;padding:16px 12px}.main{padding:18px}.top h1{font-size:22px}}
@@ -144,6 +149,15 @@
           <label><input id="ptt-enabled" type="checkbox"> Bas-konuş</label>
           <button id="ptt-bind" type="button" class="muted-btn" hidden>Tuş: V</button>
         </div>
+        <details id="audio-devices" class="audio-devices">
+          <summary>Ses cihazları</summary>
+          <div class="audio-device-grid">
+            <label>Mikrofon <select id="audio-input"></select></label>
+            <label>Sesli sohbet çıkışı <select id="audio-output"></select></label>
+          </div>
+          <button id="audio-enable" type="button" class="muted-btn">Cihazları göster</button>
+          <p id="audio-device-status" class="statusline" role="status"></p>
+        </details>
         <p id="voice-status" class="statusline">Henüz sesli odaya katılmadın.</p>
         <form id="music-form" class="chatrow">
           <input id="music-url" type="url" maxlength="2048" aria-label="YouTube bağlantısı" placeholder="https://youtu.be/…" required disabled>
@@ -1225,6 +1239,126 @@ function syncMusicScope(connected){
   }
 }
 
+const audioKinds={
+  audioinput:{select:"audio-input",label:"Mikrofon"},
+  audiooutput:{select:"audio-output",label:"Kulaklık veya hoparlör"}
+};
+const audioPreferences={
+  audioinput:localStorage.getItem("birartibir_audioinput") || "default",
+  audiooutput:localStorage.getItem("birartibir_audiooutput") || "default"
+};
+const canSwitchAudioOutput=typeof HTMLMediaElement.prototype.setSinkId==="function";
+const appliedAudioDevices=new WeakMap();
+let audioDevices=[];
+let audioDeviceTask=Promise.resolve();
+let audioInputDeferred=false;
+
+function selectedAudioDevice(kind){
+  const id=audioPreferences[kind];
+  return audioDevices.some(device=>device.kind===kind && device.deviceId===id) ? id : "default";
+}
+
+function selectedMicrophoneOptions(){
+  const id=selectedAudioDevice("audioinput");
+  return id==="default" ? undefined : {deviceId:{ideal:id}};
+}
+
+function renderAudioDeviceOptions(){
+  for(const [kind,{select,label}] of Object.entries(audioKinds)){
+    const control=$(select);
+    if(!control) continue;
+    const options=[new Option("Sistem varsayılanı","default")];
+    for(const device of audioDevices){
+      if(device.kind!==kind || !device.deviceId || device.deviceId==="default" ||
+          device.deviceId==="communications") continue;
+      options.push(new Option(device.label || label+" "+options.length,device.deviceId));
+    }
+    const preferred=audioPreferences[kind];
+    if(!options.some(option=>option.value===preferred)){
+      const unavailable=new Option("Seçilen cihaz bağlı değil",""+preferred);
+      unavailable.disabled=true;
+      options.push(unavailable);
+    }
+    control.replaceChildren(...options);
+    control.value=preferred;
+    control.disabled=kind==="audiooutput" && !canSwitchAudioOutput;
+  }
+}
+
+async function applyAudioDevices(){
+  const room=livekitRoom;
+  if(!room || joiningVoice || leavingVoice || typeof room.switchActiveDevice!=="function") return "";
+  let applied=appliedAudioDevices.get(room);
+  if(!applied){
+    applied={audioinput:"default",audiooutput:"default"};
+    appliedAudioDevices.set(room,applied);
+  }
+  const errors=[];
+  for(const kind of Object.keys(audioKinds)){
+    if(room!==livekitRoom) break;
+    if(kind==="audiooutput" && !canSwitchAudioOutput) continue;
+    const id=selectedAudioDevice(kind);
+    if(applied[kind]===id) continue;
+    if(kind==="audioinput" && (muteChanging || pttHeld)){
+      audioInputDeferred=true;
+      continue;
+    }
+    if(kind==="audioinput"){
+      muteChanging=true;
+      renderVoiceButtons();
+    }
+    try{
+      if(!await room.switchActiveDevice(kind,id,id!=="default")) throw new Error("Cihaz değişmedi");
+      applied[kind]=id;
+    }catch(error){
+      console.warn("Ses cihazı değiştirilemedi:",kind,error);
+      errors.push(audioKinds[kind].label+" değiştirilemedi.");
+    }finally{
+      if(kind==="audioinput"){
+        muteChanging=false;
+        renderVoiceButtons();
+        if(pttEnabled) void syncPushTalk();
+      }
+    }
+  }
+  return errors.join(" ");
+}
+
+function refreshAudioDevices(requestPermission=false){
+  const refresh=async()=>{
+    const media=navigator.mediaDevices;
+    if(!media?.enumerateDevices){
+      setText("audio-device-status","Bu tarayıcı ses cihazlarını listeleyemiyor.");
+      return;
+    }
+    let message="";
+    try{
+      if(requestPermission){
+        const stream=await media.getUserMedia({audio:true});
+        stream.getTracks().forEach(track=>track.stop());
+      }
+      audioDevices=await media.enumerateDevices();
+    }catch(error){
+      console.warn("Ses cihazları listelenemedi:",error);
+      message="Cihazları göstermek için mikrofon iznini kontrol et.";
+    }
+    renderAudioDeviceOptions();
+    const error=await applyAudioDevices();
+    const missing=Object.keys(audioKinds).some(kind=>audioPreferences[kind]!=="default" &&
+      selectedAudioDevice(kind)==="default");
+    setText("audio-device-status",message || error || (missing ? "Seçilen cihaz bağlı değil. Sistem varsayılanı kullanılıyor." :
+      !canSwitchAudioOutput ? "Bu tarayıcıda çıkışı işletim sistemi ayarlarından seçebilirsin." : ""));
+  };
+  audioDeviceTask=audioDeviceTask.then(refresh,refresh);
+  return audioDeviceTask;
+}
+
+function refreshDeferredAudioInput(){
+  if(!audioInputDeferred || pttHeld || muteChanging) return;
+  audioInputDeferred=false;
+  void refreshAudioDevices();
+}
+
 function renderVoiceButtons(){
   const connected=Boolean(livekitRoom);
   const musicConnected=connected && !joiningVoice && !leavingVoice && !roomChanging;
@@ -1383,7 +1517,7 @@ async function joinVoice(){
     await room.connect(result.serverUrl,result.token);
     livekitRoom=room;
     try{
-      await room.localParticipant.setMicrophoneEnabled(!pttEnabled);
+      await room.localParticipant.setMicrophoneEnabled(!pttEnabled,selectedMicrophoneOptions());
       muted=pttEnabled;
     }catch(error){
       muted=true;
@@ -1397,6 +1531,7 @@ async function joinVoice(){
     void publishVoiceState(true);
     playNotificationSound("join");
     toast("Sesli odaya katıldın!");
+    void refreshAudioDevices();
   }catch(error){
     console.error("Ses odasına giriş hatası:",error);
     if(room){try{await room.disconnect();}catch{}}
@@ -1430,7 +1565,7 @@ async function setVoiceMicrophone(enabled){
   muteChanging=true;
   renderVoiceButtons();
   try{
-    await room.localParticipant.setMicrophoneEnabled(enabled);
+    await room.localParticipant.setMicrophoneEnabled(enabled,enabled ? selectedMicrophoneOptions() : undefined);
     if(room!==livekitRoom) return;
     muted=!enabled;
     renderSidebarVoiceUsers();
@@ -1443,6 +1578,7 @@ async function setVoiceMicrophone(enabled){
   }finally{
     muteChanging=false;
     renderVoiceButtons();
+    refreshDeferredAudioInput();
   }
 }
 async function syncPushTalk(){
@@ -1462,6 +1598,7 @@ function releasePushTalk(){
   if(!pttHeld) return;
   pttHeld=false;
   void syncPushTalk();
+  refreshDeferredAudioInput();
 }
 
 function handlePushTalkKey(event){
@@ -1634,6 +1771,19 @@ window.addEventListener("keydown",handlePushTalkKey);
 window.addEventListener("keyup",event=>{if(event.code===pttKey) releasePushTalk();});
 window.addEventListener("blur",releasePushTalk);
 document.addEventListener("visibilitychange",()=>{if(document.hidden) releasePushTalk();});
+for(const [kind,{select}] of Object.entries(audioKinds)){
+  $(select).addEventListener("change",event=>{
+    audioPreferences[kind]=event.target.value;
+    localStorage.setItem("birartibir_"+kind,event.target.value);
+    void refreshAudioDevices();
+  });
+}
+$("audio-devices").addEventListener("toggle",()=>{
+  if($("audio-devices").open) void refreshAudioDevices();
+});
+$("audio-enable").addEventListener("click",()=>void refreshAudioDevices(true));
+navigator.mediaDevices?.addEventListener?.("devicechange",()=>void refreshAudioDevices());
+renderAudioDeviceOptions();
 renderVoiceButtons();
 $("music-stop").addEventListener("click",()=>void sendMusicCommand("stop"));
 $("join-btn").addEventListener("click",joinVoice);
