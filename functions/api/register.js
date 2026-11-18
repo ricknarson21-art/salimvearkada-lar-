@@ -1,63 +1,84 @@
 
-export async function onRequestPost() {
-  return Response.json(
-    { error: "Kayıt sistemi henüz hazırlanıyor." },
-    { status: 503 }
-  );
-}
-
 const SUPABASE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co";
 
-const json = (data, status = 200) =>
-  Response.json(data, {
+function reply(data, status = 200) {
+  return Response.json(data, {
     status,
     headers: { "Cache-Control": "no-store" }
   });
+}
 
-function validUsername(value) {
-  return typeof value === "string" &&
-    /^[a-zA-Z0-9_]{3,20}$/.test(value);
+async function verifyTurnstile(token, request, secret) {
+  if (!token || !secret) return false;
+
+  const form = new FormData();
+  form.append("secret", secret);
+  form.append("response", token);
+
+  const ip = request.headers.get("CF-Connecting-IP");
+  if (ip) form.append("remoteip", ip);
+
+  const response = await fetch(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    { method: "POST", body: form }
+  );
+
+  if (!response.ok) return false;
+
+  const result = await response.json();
+
+  return result.success === true &&
+    result.hostname === "birartibir.online";
 }
 
 export async function onRequestPost({ request, env }) {
   try {
-    // Yalnızca kendi sitemizden gelen istekleri kabul et.
     const origin = new URL(request.url).origin;
 
     if (request.headers.get("Origin") !== origin) {
-      return json({ error: "Geçersiz istek." }, 403);
+      return reply({ error: "Geçersiz istek." }, 403);
+    }
+
+    if (!env.SUPABASE_SECRET_KEY ||
+        !env.TURNSTILE_SECRET_KEY) {
+      return reply({
+        error: "Sunucu yapılandırması eksik."
+      }, 500);
     }
 
     const body = await request.json().catch(() => null);
 
     const username = body?.username?.trim();
     const password = body?.password;
-
-    if (!validUsername(username)) {
-      return json({
-        error: "Kullanıcı adı 3-20 karakter olmalı. Harf, rakam ve alt çizgi kullanabilirsin."
-      }, 400);
-    }
+    const turnstileToken = body?.turnstileToken;
 
     if (
+      typeof username !== "string" ||
+      !/^[a-zA-Z0-9_]{3,20}$/.test(username) ||
       typeof password !== "string" ||
       password.length < 12 ||
       password.length > 128
     ) {
-      return json({
-        error: "Şifre 12-128 karakter olmalı."
+      return reply({
+        error: "Kullanıcı adı 3-20 karakter, şifre 12-128 karakter olmalı."
       }, 400);
     }
 
-    if (!env.SUPABASE_SECRET_KEY) {
-      return json({ error: "Sunucu yapılandırması eksik." }, 500);
+    const verified = await verifyTurnstile(
+      turnstileToken,
+      request,
+      env.TURNSTILE_SECRET_KEY
+    );
+
+    if (!verified) {
+      return reply({
+        error: "Güvenlik doğrulaması başarısız."
+      }, 403);
     }
 
-    // Kullanıcı adını Auth tarafından kullanılacak
-    // dahili bir e-posta kimliğine dönüştürür.
-    // Kullanıcıdan gerçek e-posta istenmez.
     const internalEmail =
-      username.toLowerCase() + "@accounts.birartibir.invalid";
+      username.toLowerCase() +
+      "@accounts.birartibir.invalid";
 
     const headers = {
       apikey: env.SUPABASE_SECRET_KEY,
@@ -65,7 +86,6 @@ export async function onRequestPost({ request, env }) {
       "Content-Type": "application/json"
     };
 
-    // Kullanıcıyı Supabase Auth üzerinde oluştur.
     const authResponse = await fetch(
       SUPABASE_URL + "/auth/v1/admin/users",
       {
@@ -75,22 +95,35 @@ export async function onRequestPost({ request, env }) {
           email: internalEmail,
           password,
           email_confirm: true,
-          app_metadata: { account_type: "registered" }
+          app_metadata: {
+            account_type: "registered"
+          }
         })
       }
     );
 
-    const authData = await authResponse.json();
+    const authData = await authResponse.json().catch(() => ({}));
 
-    if (!authResponse.ok) {
-      return json({
-        error: "Bu kullanıcı adı kullanılıyor veya hesap oluşturulamadı."
+    if (!authResponse.ok || !authData.id) {
+      return reply({
+        error: "Bu kullanıcı adı kullanılıyor veya kayıt oluşturulamadı."
       }, 409);
     }
 
     const userId = authData.id;
 
-    // Kullanıcı adını kayıtlı hesaplar tablosuna ekle.
+    async function rollback() {
+      const response = await fetch(
+        SUPABASE_URL + "/auth/v1/admin/users/" +
+          encodeURIComponent(userId),
+        { method: "DELETE", headers }
+      );
+
+      if (!response.ok) {
+        console.error("Account rollback failed:", response.status);
+      }
+    }
+
     const profileResponse = await fetch(
       SUPABASE_URL + "/rest/v1/registered_accounts",
       {
@@ -107,18 +140,12 @@ export async function onRequestPost({ request, env }) {
     );
 
     if (!profileResponse.ok) {
-      // Kısmi hesap oluşmasını önlemek için geri al.
-      await fetch(
-        SUPABASE_URL + "/auth/v1/admin/users/" + userId,
-        { method: "DELETE", headers }
-      );
-
-      return json({
-        error: "Kullanıcı adı kaydedilemedi."
+      await rollback();
+      return reply({
+        error: "Kullanıcı hesabı tamamlanamadı."
       }, 500);
     }
 
-    // Yeni hesap varsayılan olarak normal üyedir.
     const roleResponse = await fetch(
       SUPABASE_URL + "/rest/v1/account_roles",
       {
@@ -135,21 +162,22 @@ export async function onRequestPost({ request, env }) {
     );
 
     if (!roleResponse.ok) {
-      await fetch(
-        SUPABASE_URL + "/auth/v1/admin/users/" + userId,
-        { method: "DELETE", headers }
-      );
-
-      return json({ error: "Hesap yetkisi oluşturulamadı." }, 500);
+      await rollback();
+      return reply({
+        error: "Hesap yetkisi oluşturulamadı."
+      }, 500);
     }
 
-    return json({
+    return reply({
       success: true,
       message: "Hesap oluşturuldu."
     }, 201);
 
   } catch (error) {
-    console.error("Register error:", error);
-    return json({ error: "Kayıt işlemi başarısız." }, 500);
+    console.error("Registration error:", error);
+
+    return reply({
+      error: "Kayıt işlemi başarısız."
+    }, 500);
   }
 }
