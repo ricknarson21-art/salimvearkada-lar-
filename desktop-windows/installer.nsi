@@ -54,7 +54,7 @@ Section
   CreateShortcut "$SMPROGRAMS\Bir Artı Bir.lnk" "$INSTDIR\BirArtiBir.exe"
   CreateShortcut "$DESKTOP\Bir Artı Bir.lnk" "$INSTDIR\BirArtiBir.exe"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "Bir Artı Bir"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "0.4.0"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "0.5.0"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\BirArtiBir.exe"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Kaldir.exe"'

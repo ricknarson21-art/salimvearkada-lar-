@@ -36,6 +36,11 @@ internal sealed class DesktopWindow : Form
     private OverlaySnapshot? overlaySnapshot;
     private readonly ToolStripMenuItem overlaySetting = new("Oyun göstergesi") { CheckOnClick = true, ShortcutKeyDisplayString = "Ctrl+Shift+F10" };
     private int overlayLastUpdate;
+    private readonly ToolStripMenuItem updateMenu = new("Güncelleme");
+    private readonly ToolStripMenuItem checkUpdate = new("Güncellemeleri denetle");
+    private readonly ToolStripMenuItem downloadUpdate = new("Güncellemeyi indir") { Enabled = false };
+    private DesktopRelease? availableUpdate;
+    private bool updateBusy;
     private CoreWebView2? web;
     private bool? microphoneAllowed;
 
@@ -55,6 +60,12 @@ internal sealed class DesktopWindow : Form
         resizeOverlay.Click += (_, _) => ResizeOverlay();
         viewMenu.DropDownItems.Add(resizeOverlay);
         menu.Items.Add(viewMenu);
+        updateMenu.DropDownItems.Add(new ToolStripMenuItem("Sürüm " + DesktopUpdates.Installed) { Enabled = false });
+        updateMenu.DropDownItems.Add(checkUpdate);
+        updateMenu.DropDownItems.Add(downloadUpdate);
+        checkUpdate.Click += async (_, _) => await CheckForUpdateAsync(showResult: true);
+        downloadUpdate.Click += async (_, _) => await DownloadUpdateAsync();
+        menu.Items.Add(updateMenu);
         MainMenuStrip = menu;
         Controls.Add(webView);
         Controls.Add(menu);
@@ -75,7 +86,11 @@ internal sealed class DesktopWindow : Form
             ReadForegroundKey();
             RefreshOverlay();
         };
-        Shown += async (_, _) => await InitializeSiteAsync();
+        Shown += async (_, _) =>
+        {
+            _ = CheckForUpdateAsync(showResult: false);
+            await InitializeSiteAsync();
+        };
         FormClosing += (_, _) =>
         {
             keyboardTimer.Stop();
@@ -86,6 +101,68 @@ internal sealed class DesktopWindow : Form
             overlay.Dispose();
             keyboardTimer.Dispose();
         };
+    }
+
+    private void SetUpdateBusy(bool busy)
+    {
+        updateBusy = busy;
+        checkUpdate.Enabled = !busy;
+        downloadUpdate.Enabled = !busy && availableUpdate != null;
+    }
+
+    private async System.Threading.Tasks.Task CheckForUpdateAsync(bool showResult)
+    {
+        if (updateBusy) return;
+        SetUpdateBusy(true);
+        try
+        {
+            var release = await DesktopUpdates.CheckAsync();
+            if (IsDisposed) return;
+            availableUpdate = release;
+            updateMenu.Text = release == null ? "Güncelleme" : "Güncelleme var";
+            downloadUpdate.Text = release == null ? "Güncellemeyi indir" : $"v{release.Version} sürümünü indir";
+            if (showResult && release == null)
+                MessageBox.Show(this, "Bir Artı Bir güncel.", Text, MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+        }
+        catch (Exception error)
+        {
+            if (showResult && !IsDisposed)
+                MessageBox.Show(this, "Güncelleme denetlenemedi.\n" + error.Message, Text,
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            if (!IsDisposed) SetUpdateBusy(false);
+        }
+    }
+
+    private async System.Threading.Tasks.Task DownloadUpdateAsync()
+    {
+        if (updateBusy || availableUpdate == null) return;
+        SetUpdateBusy(true);
+        try
+        {
+            var path = await DesktopUpdates.DownloadAsync(availableUpdate);
+            if (IsDisposed) return;
+            if (MessageBox.Show(this, "Güncelleme indirildi. Kuruluma geçmek için uygulama kapanacak. Şimdi kurulsun mu?",
+                    Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+                Close();
+            }
+            else Process.Start(new ProcessStartInfo("explorer.exe", "/select,\"" + path + "\"") { UseShellExecute = true });
+        }
+        catch (Exception error)
+        {
+            if (!IsDisposed)
+                MessageBox.Show(this, "Güncelleme tamamlanamadı.\n" + error.Message, Text,
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+        finally
+        {
+            if (!IsDisposed) SetUpdateBusy(false);
+        }
     }
 
     private async System.Threading.Tasks.Task InitializeSiteAsync()

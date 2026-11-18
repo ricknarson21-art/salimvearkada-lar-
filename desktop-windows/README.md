@@ -11,3 +11,9 @@ Bir ses odasına bağlıyken başka bir pencereye geçince gösterge aktif pence
 ## Derleme
 
 .NET 8 SDK ile `dotnet build -c Release` çalıştır. Ardından NSIS 3 ile `makensis installer.nsi` komutunu bu klasörde çalıştır. Derleme 64 bit Windows için .NET Framework 4.8 ve Microsoft WebView2 kullanır.
+
+## Windows güncellemeleri
+
+Uygulama açıldığında yeni sürümü kontrol eder. **Güncelleme** menüsünden elle de kontrol edebilirsin. Yeni sürüm varsa kurulum dosyasını indir ve kurmayı onayla.
+
+Bir sürümü yayınlamak için Windows kurulum dosyasını Cloudflare Pages üzerindeki `desktop-update/` dizinine `BirArtiBir-Setup-Windows-x64-vMAJOR.MINOR.PATCH.exe` adıyla ekle. Aynı dağıtımda `latest.json` dosyasına sürümü (`Version`) ve kurulum dosyasının SHA-256 özetini (`Sha256`) yaz.
