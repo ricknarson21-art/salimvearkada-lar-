@@ -203,10 +203,12 @@ export async function onRequestPost({ request, env }) {
     }, 201);
 
   } catch (error) {
-    console.error("Registration error", error);
+  console.error("Registration error", error);
 
-    return json({
-      error: "Kayıt işlemi başarısız."
-    }, 500);
-  }
+  return json({
+    error: "Kayıt işlemi başarısız.",
+    detail: error instanceof Error
+      ? error.name
+      : "UnknownError"
+  }, 500);
 }
