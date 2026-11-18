@@ -1,4 +1,4 @@
-
+const internalEmail =   username.toLowerCase() +   "@accounts.bi
 const SUPABASE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co";
 
 function reply(data, status = 200) {
@@ -87,8 +87,8 @@ export async function onRequestPost({ request, env }) {
 
     // Kullanıcı adından dahili giriş kimliği oluşturulur.
     const internalEmail =
-      username.toLowerCase() +
-      "@accounts.birartibir.invalid";
+  username.toLowerCase() +
+  "@accounts.birartibir.online";
 
     // Şifreyi yalnızca Supabase Auth doğrular.
     const response = await fetch(
