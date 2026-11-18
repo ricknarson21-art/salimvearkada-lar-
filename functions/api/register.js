@@ -60,7 +60,7 @@ export async function onRequestPost({ request, env }) {
       password.length > 128
     ) {
       return reply({
-        error: "Kullanıcı adı 3-20 karakter, şifre 12-128 karakter olmalı."
+        error: "Kullanıcı adı 3-20 karakter, şifre 6-128 karakter olmalı."
       }, 400);
     }
 
