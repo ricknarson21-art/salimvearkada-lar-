@@ -56,7 +56,7 @@ export async function onRequestPost({ request, env }) {
       typeof username !== "string" ||
       !/^[a-zA-Z0-9_]{3,20}$/.test(username) ||
       typeof password !== "string" ||
-      password.length < 12 ||
+      password.length < 6 ||
       password.length > 128
     ) {
       return reply({
