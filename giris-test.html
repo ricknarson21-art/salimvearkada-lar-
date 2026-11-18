@@ -1,134 +1,538 @@
-
 <!doctype html>
 <html lang="tr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Bir Artı Bir - Giriş Testi</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1220">
+  <title>salimvearkadaşları</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
   <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      background: radial-gradient(ellipse at top, #243a5a, #0b1220 70%);
-      color: #e5edf8;
-      font: 15px Arial, sans-serif;
-      padding: 20px;
-    }
-    .panel {
-      width: 100%;
-      max-width: 420px;
-      padding: 30px;
-      border-radius: 18px;
-      background: #152238;
-      border: 1px solid #304866;
-      text-align: center;
-    }
-    h1 { margin: 10px 0; }
-    p { color: #9aabc2; }
-    .tabs {
-      display: flex;
-      gap: 6px;
-      margin: 24px 0;
-    }
-    button {
-      border: 0;
-      border-radius: 9px;
-      padding: 12px;
-      color: white;
-      background: #2563eb;
-      font-weight: bold;
-      cursor: pointer;
-    }
-    .tabs button {
-      flex: 1;
-      background: #263852;
-    }
-    .tabs button.active {
-      background: #2563eb;
-    }
-    input {
-      width: 100%;
-      padding: 13px;
-      margin-bottom: 12px;
-      border: 1px solid #304866;
-      border-radius: 9px;
-      background: #1c2d45;
-      color: white;
-    }
-    .submit { width: 100%; }
-    .hidden { display: none; }
-    .note { font-size: 12px; }
-    .notice {
-      margin-top: 16px;
-      color: #facc15;
-      font-size: 13px;
-    }
+    :root{color-scheme:dark;--bg:#0b1220;--side:#111d30;--panel:#152238;--panel2:#1b2b43;--panel3:#20334f;--line:#263852;--text:#e5edf8;--muted:#9aabc2;--blue:#2563eb;--green:#34d399;--red:#dc4659}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 Arial,system-ui,sans-serif}
+    button,input{font:inherit}
+    button{border:0;border-radius:9px;padding:11px 16px;color:#fff;background:var(--blue);font-weight:700;cursor:pointer}
+    button:hover{filter:brightness(1.1)}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .app{display:flex;min-height:100vh}
+    .sidebar{width:250px;flex:0 0 250px;background:var(--side);padding:22px 18px;border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:100vh}
+    .brand h1{font-size:22px;margin:0 0 18px;color:#fff;overflow-wrap:anywhere}
+    .server-label{margin:0 0 12px;color:#c5d3e6}
+    .room-link{padding:10px 12px;background:var(--panel2);border-radius:9px;margin:5px 0 7px;cursor:pointer;border:1px solid transparent;color:#dce8f8}.room-link.active{border-color:#6598ee;background:#203b61}.room-list{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}.room-link:hover{filter:brightness(1.15)}
+    hr{border:0;border-top:1px solid #d6deeb;margin:0 0 17px}
+    .side-heading{font-size:15px;margin:0 0 10px}
+    #sidebar-voice-users{display:flex;flex-direction:column;gap:8px}
+    .sidebar-person{display:flex;align-items:center;gap:9px;padding:10px;background:var(--panel2);border-radius:9px;overflow-wrap:anywhere}.sidebar-person.speaking,.online-person.speaking{outline:2px solid var(--green);box-shadow:0 0 14px #34d39966}.room-hint{font-size:12px;color:var(--muted);margin:0 0 8px}
+    .avatar{width:34px;height:34px;flex:0 0 34px;border-radius:50%;background:#3566b5;display:grid;place-items:center;font-weight:bold;color:#fff}
+    .sidebar-person .avatar{width:28px;height:28px;flex-basis:28px;font-size:12px}
+    .empty{color:var(--muted);font-size:13px;padding:8px 2px}
+    .side-bottom{margin-top:auto;padding-top:18px}
+    .me{display:flex;align-items:center;gap:9px;min-width:0}
+    .me-info{min-width:0;flex:1}
+    .me-info strong,.me-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .me-info small{color:var(--muted)}
+    .main{flex:1;min-width:0;padding:32px;display:flex;flex-direction:column;gap:18px;max-width:1250px;margin:0 auto;width:100%}
+    .top{display:flex;justify-content:space-between;align-items:center;gap:12px}
+    .top h1{font-size:28px;margin:0}
+    .status-pill{font-size:12px;color:#b9f1d8;background:#1d463b;padding:7px 11px;border-radius:20px;white-space:nowrap}
+    .card{background:var(--panel);border:1px solid #253a57;border-radius:16px;padding:20px;box-shadow:0 6px 20px #0002}
+    .card h2{font-size:21px;margin:0 0 10px;color:#f1f5f9}
+    .online-title{margin:0 0 10px;color:#e5edf8}
+    .online-grid{display:flex;flex-wrap:wrap;gap:12px;min-height:26px;padding:4px 0 8px}
+    .online-person{display:flex;align-items:center;gap:9px;background:var(--panel3);border:1px solid #304768;border-radius:12px;padding:10px 13px;min-width:125px}
+    .online-person .avatar{width:32px;height:32px;flex-basis:32px}
+    .online-name{font-weight:600;overflow-wrap:anywhere}
+    .online-dot{width:9px;height:9px;border-radius:50%;background:var(--green);margin-left:auto;flex:none}
+    .voice-controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+    .muted-btn{background:#34445f}
+    .danger{background:var(--red)}
+    .statusline{color:var(--muted);font-size:13px;margin:12px 0 0;min-height:18px}
+    #messages{height:280px;overflow-y:auto;background:#0e192b;padding:15px;border-radius:12px}
+    .message{padding:8px 3px;border-bottom:1px solid #1b2b43;overflow-wrap:anywhere}
+    .message:last-child{border-bottom:0}
+    .message strong{color:#9bbcff;margin-right:8px}
+    .message time{font-size:11px;color:var(--muted)}
+    .chatrow{display:flex;gap:8px;margin-top:12px}
+    .chatrow input,.login-box input{min-width:0;padding:13px;border:1px solid #304866;border-radius:9px;background:#1c2d45;color:#fff;outline:none}
+    .chatrow input{flex:1}
+    .login{position:fixed;inset:0;z-index:100;background:radial-gradient(ellipse at top,#243a5a,#0b1220 65%);display:flex;align-items:center;justify-content:center;padding:20px}
+    .login-box{width:min(380px,100%);background:#152238;border:1px solid #304866;border-radius:18px;padding:30px;text-align:center;box-shadow:0 25px 80px #0008}
+    .login-box h1{margin:8px 0;color:#fff}
+    .login-box p{color:var(--muted)}
+    .login-box input{width:100%;margin:10px 0 12px}
+    .login-box button{width:100%}
+    .login-note{font-size:12px!important}
+    .auth-tabs{display:flex;gap:6px;margin:15px 0}
+    .auth-tabs button{flex:1;padding:10px 5px;background:#263852;font-size:12px}
+    .auth-tabs button.active{background:var(--blue)}
+    .auth-pane{display:none}.auth-pane.active{display:block}
+    .auth-pane input{margin:5px 0 10px}
+    .turnstile-holder{display:flex;justify-content:center;margin:10px 0;min-height:65px}
+    .auth-error{color:#fda4af;font-size:13px;min-height:20px}
+    .mic-off{color:#fb7185;margin-left:auto;font-size:17px}
+
+    .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#20334f;border:1px solid #456080;padding:10px 15px;border-radius:10px;display:none;z-index:200;max-width:min(90vw,600px)}
+    @media(max-width:700px){.sidebar{width:190px;flex-basis:190px;padding:16px 12px}.main{padding:18px}.top h1{font-size:22px}}
+    @media(max-width:520px){.app{display:block}.sidebar{width:100%;min-height:0;padding:14px}.brand h1{font-size:19px;margin-bottom:10px}.side-bottom{margin-top:15px}.main{padding:14px}.top h1{font-size:20px}.card{padding:15px}.chatrow button{padding:10px}}
   </style>
 </head>
 <body>
-  <main class="panel">
-    <div style="font-size:42px">🎧</div>
-    <h1>Bir Artı Bir</h1>
-    <p>Arkadaşlarınla buluş, konuş ve eğlen!</p>
+  <div class="app" id="app" aria-hidden="true">
+    <aside class="sidebar">
+      <div class="brand"><h1>🎧 salimvearkadaşları</h1></div>
+      <p class="server-label">ÖZEL SUNUCUMUZ</p>
+      <div class="side-heading">Sesli odalar</div>
+      <div class="room-list" id="room-list">
+        <button class="room-link active" data-room="genel">🎙️ Genel</button>
+        <button class="room-link" data-room="oyun">🎮 Oyun</button>
+        <button class="room-link" data-room="muhabbet">☕ Muhabbet</button>
+      </div>
+      <hr>
+      <h3 class="side-heading"> <span id="selected-room-label">Genel</span> — Odadakiler <span id="voice-count" style="color:#9aabc2;font-weight:normal">(0)</span></h3>
+      <div id="sidebar-voice-users"><div class="empty">Henüz kimse katılmadı.</div></div>
+      <div class="side-bottom">
+        <div class="me"><div class="avatar" id="my-avatar">?</div><div class="me-info"><strong id="my-name">Misafir</strong><small>Misafir hesabı</small></div><button class="muted-btn" id="logout-btn" title="Çıkış yap">↪</button></div>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="top"><h1>Arkadaş odası</h1><span class="status-pill" id="connection-state">Bağlanıyor…</span></div>
+      <section class="card">
+        <h2 id="voice-heading">🔊 Genel ses odası</h2>
+        <p class="room-hint">Bir ses odası seç; yalnızca o odadaki kişiler burada görünür.</p>
+        <p class="online-title">🟢 Çevrimiçi arkadaşlar</p>
+        <div id="online-users" class="online-grid"><div class="empty">Giriş yapanlar burada görünür.</div></div>
+        <div class="voice-controls">
+          <button id="join-btn">Odaya katıl</button>
+          <button id="mute-btn" class="muted-btn" disabled>🎙 Mikrofon kapalı</button>
+          <button id="leave-btn" class="danger" disabled>Odadan ayrıl</button>
+        </div>
+        <p id="voice-status" class="statusline">Henüz sesli odaya katılmadın.</p>
+      </section>
+      <section class="card">
+        <h2>💬 Genel sohbet</h2>
+        <div id="messages"><div class="empty">Mesajlar yükleniyor…</div></div>
+        <div class="chatrow"><input id="msg" maxlength="2000" placeholder="Mesajını yaz…" autocomplete="off"><button id="send-btn">Gönder</button></div>
+      </section>
+    </main>
+  </div>
 
-    <div class="tabs">
-      <button class="active" data-tab="guest">Misafir</button>
-      <button data-tab="login">Giriş Yap</button>
-      <button data-tab="register">Kayıt Ol</button>
+  <div class="login" id="guest-login">
+    <div class="login-box">
+      <div style="font-size:38px">🎧</div>
+      <h1>salimvearkadaşları</h1>
+      <p>Özel arkadaş sunucumuza hoş geldin!</p>
+      <div class="auth-tabs">
+        <button type="button" class="active" data-auth="guest">Misafir</button>
+        <button type="button" data-auth="registered">Giriş Yap</button>
+        <button type="button" data-auth="register">Kayıt Ol</button>
+      </div>
+      <div class="auth-pane active" id="pane-guest">
+        <input id="guest-name" maxlength="20" placeholder="Misafir kullanıcı adı" autocomplete="nickname">
+        <button id="login-btn">Misafir olarak giriş yap</button>
+        <p class="login-note">Şifre gerekmez ❤️</p>
+      </div>
+      <div class="auth-pane" id="pane-registered">
+        <input id="registered-name" maxlength="20" placeholder="Kullanıcı adı" autocomplete="username">
+        <input id="registered-password" type="password" placeholder="Şifre" autocomplete="current-password">
+        <button id="registered-login-btn">Giriş yap</button>
+      </div>
+      <div class="auth-pane" id="pane-register">
+        <input id="register-name" maxlength="20" placeholder="Kullanıcı adı (3–20 karakter)" autocomplete="username">
+        <input id="register-password" type="password" minlength="6" placeholder="Şifre (en az 6 karakter)" autocomplete="new-password">
+        <button id="register-btn">Hesap oluştur</button>
+      </div>
+      <div id="auth-turnstile" class="turnstile-holder" style="display:none"></div>
+      <p id="auth-error" class="auth-error" role="alert"></p>
     </div>
+  </div>
+  <div class="toast" id="toast"></div>
 
-    <section id="guest">
-      <input placeholder="Misafir kullanıcı adı" maxlength="20">
-      <button class="submit" type="button">Misafir Olarak Gir</button>
-      <p class="note">Şifre gerektirmez ❤️</p>
-    </section>
+<script>
+"use strict";
 
-    <section id="login" class="hidden">
-      <input placeholder="Kullanıcı adı" autocomplete="username">
-      <input type="password" placeholder="Şifre" autocomplete="current-password">
-      <button class="submit" type="button">Giriş Yap</button>
-    </section>
+// Tarayıcıda yalnızca Supabase Publishable Key kullanılır; service_role/secret key eklenmez.
+const SUPABASE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co";
+const SUPABASE_KEY = "sb_publishable_miyRdM2azWa6gekBkfZ-Cg_V0GKcZw8";
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    <section id="register" class="hidden">
-      <input placeholder="Kullanıcı adı (3-20 karakter)" maxlength="20">
-      <input type="password" placeholder="Şifre (en az 6 karakter)" autocomplete="new-password">
-      <button class="submit" type="button">Hesap Oluştur</button>
-      <p class="note">E-posta istenmez.</p>
-    </section>
+let currentUser = null;
+let currentUsername = null;
+let onlineChannel = null;
+let voicePresenceChannel = null;
+let chatChannel = null;
+let livekitRoom = null;
+let muted = false;
+let leavingVoice = false;
+let selectedRoom = "genel";
+let activeSpeakerIds = new Set();
+let accountType = "guest";
+let turnstileWidgetId = null;
+let authMode = "guest";
 
-    <p class="notice" id="notice">
-      🧪 Test ekranı — hesap işlemleri henüz aktif değil.
-    </p>
-  </main>
+const $ = id => document.getElementById(id);
+function initials(name){return (name || "?").trim().slice(0,1).toLocaleUpperCase("tr-TR");}
+function toast(message){
+  const el=$("toast"); el.textContent=message; el.style.display="block";
+  clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.style.display="none",3500);
+}
+function setText(id,value){$(id).textContent=value ?? "";}
+function showApp(){
+  $("guest-login").style.display="none";
+  $("app").setAttribute("aria-hidden","false");
+  setText("my-name",currentUsername);
+  setText("my-avatar",initials(currentUsername));
+  document.querySelector(".me-info small").textContent=accountType==="registered"?"Kayıtlı hesap":"Misafir hesabı";
+  setText("connection-state","Bağlandı");
+}
+function uniquePresencePeople(channel){
+  const all=Object.values(channel?.presenceState?.() || {}).flat();
+  return [...new Map(all.filter(p=>p && p.user_id).map(p=>[p.user_id,p])).values()];
+}
 
-  <script>
-    const tabs = document.querySelectorAll("[data-tab]");
-    const sections = ["guest", "login", "register"];
+// Siteye giriş yapan herkes yalnızca ortadaki "Çevrimiçi arkadaşlar" alanında görünür.
+async function startOnlinePresence(){
+  if(!currentUser) return;
+  if(onlineChannel) await db.removeChannel(onlineChannel);
+  onlineChannel=db.channel("site-online-presence",{config:{presence:{key:currentUser.id}}});
+  onlineChannel.on("presence",{event:"sync"},renderOnlineUsers);
+  await subscribeAndWait(onlineChannel,"Çevrimiçi listesi");
+  await onlineChannel.track({user_id:currentUser.id,username:currentUsername});
+  renderOnlineUsers();
+}
+function renderOnlineUsers(){
+  const box=$("online-users"); if(!box) return;
+  box.replaceChildren();
+  const people=uniquePresencePeople(onlineChannel);
+  if(!people.length){box.innerHTML='<div class="empty">Şu anda çevrimiçi kimse yok.</div>';return;}
+  people.sort((a,b)=>(a.username||"").localeCompare(b.username||"","tr"));
+  for(const person of people){
+    const item=document.createElement("div"); item.className="online-person";
+    const avatar=document.createElement("div"); avatar.className="avatar"; avatar.textContent=initials(person.username);
+    const name=document.createElement("span"); name.className="online-name"; name.textContent=person.username||"Misafir";
+    const dot=document.createElement("i"); dot.className="online-dot";
+    item.append(avatar,name,dot); box.append(item);
+  }
+}
 
-    tabs.forEach(button => {
-      button.addEventListener("click", () => {
-        tabs.forEach(tab => {
-          tab.classList.toggle("active", tab === button);
-        });
+// Her ses odasının kendi Supabase Presence kanalı vardır.
+async function subscribeVoicePresence(roomName=selectedRoom){
+  if(!currentUser) return;
+  if(voicePresenceChannel) await db.removeChannel(voicePresenceChannel);
+  voicePresenceChannel=db.channel("voice-room-"+roomName,{config:{presence:{key:currentUser.id}}});
+  voicePresenceChannel.on("presence",{event:"sync"},renderSidebarVoiceUsers);
+  await subscribeAndWait(voicePresenceChannel,"Ses odası listesi");
+  renderSidebarVoiceUsers();
+}
+function renderSidebarVoiceUsers(){
+  const box=$("sidebar-voice-users"); if(!box) return;
+  box.replaceChildren();
+  const people=uniquePresencePeople(voicePresenceChannel);
+  setText("voice-count","("+people.length+")");
+  if(!people.length){box.innerHTML='<div class="empty">Bu odada henüz kimse yok.</div>';return;}
+  people.sort((a,b)=>(a.username||"").localeCompare(b.username||"","tr"));
+  for(const person of people){
+    const row=document.createElement("div"); row.className="sidebar-person"+(activeSpeakerIds.has(person.user_id)?" speaking":"");
+    const avatar=document.createElement("div"); avatar.className="avatar"; avatar.textContent=initials(person.username);
+    const name=document.createElement("strong"); name.textContent=person.username||"Misafir";
+    row.append(avatar,name);
+    if(person.mic_muted===true){const off=document.createElement("span");off.className="mic-off";off.textContent="🎙̸";off.title="Mikrofon kapalı";row.append(off);}
+    box.append(row);
+  }
+}
+async function selectRoom(roomName){
+  if(!["genel","oyun","muhabbet"].includes(roomName)) return;
+  if(livekitRoom){toast("Önce bulunduğun ses odasından ayrılmalısın.");return;}
+  selectedRoom=roomName;
+  const labels={genel:"Genel",oyun:"Oyun",muhabbet:"Muhabbet"};
+  setText("selected-room-label",labels[roomName]);
+  setText("voice-heading","🔊 "+labels[roomName]+" ses odası");
+  document.querySelectorAll("[data-room]").forEach(button=>button.classList.toggle("active",button.dataset.room===roomName));
+  await subscribeVoicePresence(roomName);
+  setText("voice-status",labels[roomName]+" odası seçildi. Katılmaya hazırsın.");
+}
 
-        sections.forEach(id => {
-          document.getElementById(id).classList.toggle(
-            "hidden",
-            id !== button.dataset.tab
-          );
-        });
-      });
+async function subscribeAndWait(channel,label){
+  await new Promise((resolve,reject)=>{
+    const timeout=setTimeout(()=>reject(new Error(label+" bağlantısı zaman aşımına uğradı.")),12000);
+    channel.subscribe(status=>{
+      if(status==="SUBSCRIBED"){clearTimeout(timeout);resolve();}
+      else if(status==="CHANNEL_ERROR" || status==="TIMED_OUT"){
+        clearTimeout(timeout);reject(new Error(label+" bağlantısı kurulamadı: "+status));
+      }
+    });
+  });
+}
+async function login(){
+  const name=$("guest-name").value.trim();
+  if(name.length<2 || name.length>20){toast("Kullanıcı adı 2–20 karakter olmalı.");return;}
+  const btn=$("login-btn"); btn.disabled=true; btn.textContent="Giriş yapılıyor…";
+  try{
+    const {data:{session},error:sessionError}=await db.auth.getSession();
+    if(sessionError) throw sessionError;
+    if(session?.user && !session.user.is_anonymous) await db.auth.signOut();
+    let user=(await db.auth.getSession()).data.session?.user;
+    if(!user){
+      const result=await db.auth.signInAnonymously();
+      if(result.error) throw result.error;
+      user=result.data.user;
+    }
+    const {error:profileError}=await db.from("profiles").upsert(
+      {user_id:user.id,username:name},{onConflict:"user_id"}
+    );
+    if(profileError) throw profileError;
+    currentUser=user; currentUsername=name; accountType="guest";
+    localStorage.setItem("salim_guest_name",name);
+    showApp();
+    await startOnlinePresence();
+    await subscribeVoicePresence();
+    await loadMessages();
+    await subscribeMessages();
+    toast("Hoş geldin, "+name+"!");
+  }catch(error){
+    console.error(error); toast("Giriş hatası: "+error.message);
+  }finally{
+    btn.disabled=false; btn.textContent="Misafir olarak giriş yap";
+  }
+}
+async function restoreSession(){
+  try{
+    const {data:{session},error}=await db.auth.getSession();
+    if(error || !session) return;
+    const {data:profile,error:profileError}=await db.from("profiles").select("username").eq("user_id",session.user.id).maybeSingle();
+    if(profileError || !profile?.username) return;
+    currentUser=session.user; currentUsername=profile.username; accountType=session.user.is_anonymous?"guest":"registered";
+    localStorage.setItem("salim_guest_name",currentUsername);
+    showApp();
+    await startOnlinePresence();
+    await subscribeVoicePresence();
+    await loadMessages();
+    await subscribeMessages();
+  }catch(error){console.error("Oturum geri yüklenemedi:",error);}
+}
+
+async function joinVoice(){
+  if(!currentUser){toast("Önce giriş yapmalısın.");return;}
+  if(livekitRoom) return;
+  const btn=$("join-btn"); btn.disabled=true;
+  setText("voice-status","Ses odasına bağlanılıyor…");
+  try{
+    const {data:{session},error}=await db.auth.getSession();
+    if(error) throw error;
+    if(!session?.access_token) throw new Error("Oturum bulunamadı.");
+    const response=await fetch("/api/livekit-token",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
+      body:JSON.stringify({roomName:selectedRoom})
+    });
+    const result=await response.json();
+    if(!response.ok) throw new Error(result.error||"Ses bağlantısı kurulamadı.");
+
+    livekitRoom=new LivekitClient.Room();
+    livekitRoom.on(LivekitClient.RoomEvent.TrackSubscribed,track=>{
+      if(track.kind==="audio"){
+        const audio=track.attach(); audio.autoplay=true; document.body.appendChild(audio);
+      }
+    });
+    livekitRoom.on(LivekitClient.RoomEvent.TrackUnsubscribed,track=>{
+      track.detach().forEach(element=>element.remove());
+    });
+    livekitRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{
+      if(!leavingVoice) resetVoiceUi("Ses bağlantısı kesildi.");
+    });
+    livekitRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,speakers=>{
+      activeSpeakerIds=new Set(speakers.map(participant=>participant.identity));
+      renderSidebarVoiceUsers();
     });
 
-    document.querySelectorAll(".submit").forEach(button => {
-      button.addEventListener("click", () => {
-        document.getElementById("notice").textContent =
-          "🧪 Bu bir önizleme. Gerçek giriş ve kayıt henüz etkin değil.";
-      });
-    });
-  </script>
+    await livekitRoom.connect(result.serverUrl,result.token);
+    await livekitRoom.localParticipant.setMicrophoneEnabled(true);
+    muted=false;
+    if(voicePresenceChannel){
+      const presenceStatus=await voicePresenceChannel.track({user_id:currentUser.id,username:currentUsername,room_name:selectedRoom,mic_muted:false});
+      if(presenceStatus && presenceStatus!=="ok") console.warn("Ses odası Presence track sonucu:",presenceStatus);
+    }
+    $("mute-btn").disabled=false;
+    $("leave-btn").disabled=false;
+    $("mute-btn").textContent="🎙 Mikrofonu kapat";
+    setText("voice-status",({genel:"Genel",oyun:"Oyun",muhabbet:"Muhabbet"}[selectedRoom])+" odasına katıldın!");
+    renderSidebarVoiceUsers();
+    toast("Sesli odaya katıldın!");
+  }catch(error){
+    console.error(error);
+    if(livekitRoom){try{await livekitRoom.disconnect();}catch{} livekitRoom=null;}
+    setText("voice-status","Hata: "+error.message);
+    toast("Ses bağlantısı: "+error.message);
+  }finally{
+    btn.disabled=!!livekitRoom;
+  }
+}
+async function toggleMute(){
+  if(!livekitRoom) return;
+  try{
+    muted=!muted;
+    await livekitRoom.localParticipant.setMicrophoneEnabled(!muted);
+    $("mute-btn").textContent=muted?"🎙 Mikrofonu aç":"🎙 Mikrofonu kapat";
+    if(voicePresenceChannel) await voicePresenceChannel.track({user_id:currentUser.id,username:currentUsername,room_name:selectedRoom,mic_muted:muted});
+  }catch(error){muted=!muted;toast("Mikrofon hatası: "+error.message);}
+}
+function resetVoiceUi(message){
+  livekitRoom=null; muted=false; leavingVoice=false; activeSpeakerIds.clear();
+  $("join-btn").disabled=false; $("mute-btn").disabled=true; $("leave-btn").disabled=true;
+  $("mute-btn").textContent="🎙 Mikrofon kapalı";
+  setText("voice-status",message);
+  if(voicePresenceChannel) voicePresenceChannel.untrack().catch(console.error);
+  renderSidebarVoiceUsers();
+}
+async function leaveVoice(){
+  if(leavingVoice) return;
+  leavingVoice=true;
+  try{
+    if(livekitRoom){
+      const room=livekitRoom; livekitRoom=null;
+      await room.disconnect();
+    }
+    if(voicePresenceChannel) await voicePresenceChannel.untrack();
+    activeSpeakerIds.clear();
+    muted=false;
+    $("join-btn").disabled=false; $("mute-btn").disabled=true; $("leave-btn").disabled=true;
+    $("mute-btn").textContent="🎙 Mikrofon kapalı";
+    setText("voice-status","Odadan ayrıldın.");
+    renderSidebarVoiceUsers();
+    toast("Sesli odadan ayrıldın.");
+  }catch(error){
+    console.error(error); toast("Odadan ayrılırken hata: "+error.message);
+  }finally{leavingVoice=false;}
+}
+
+function timeLabel(value){
+  try{return new Date(value).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit"});}
+  catch{return "";}
+}
+async function loadMessages(){
+  const {data,error}=await db.from("messages").select("id,content,created_at,user_id").order("created_at",{ascending:true}).limit(100);
+  if(error){console.error(error);$("messages").innerHTML='<div class="empty">Mesajlar yüklenemedi. Supabase tablo izinlerini kontrol edin.</div>';return;}
+  const ids=[...new Set(data.map(message=>message.user_id))];
+  let names=new Map();
+  if(ids.length){
+    const {data:profiles,error:profileError}=await db.from("profiles").select("user_id,username").in("user_id",ids);
+    if(!profileError) names=new Map((profiles||[]).map(profile=>[profile.user_id,profile.username]));
+  }
+  const box=$("messages"); box.replaceChildren();
+  for(const message of data){
+    const row=document.createElement("div"); row.className="message";
+    const who=document.createElement("strong"); who.textContent=names.get(message.user_id)||"Misafir";
+    const time=document.createElement("time"); time.textContent=timeLabel(message.created_at);
+    const content=document.createElement("span"); content.textContent=message.content;
+    row.append(who,time,document.createTextNode(" "),content); box.append(row);
+  }
+  box.scrollTop=box.scrollHeight;
+}
+async function sendMessage(){
+  const input=$("msg"); const content=input.value.trim();
+  if(!content) return;
+  if(!currentUser){toast("Önce giriş yapmalısın.");return;}
+  $("send-btn").disabled=true;
+  try{
+    const {error}=await db.from("messages").insert({user_id:currentUser.id,content});
+    if(error) throw error;
+    input.value=""; await loadMessages();
+  }catch(error){console.error(error);toast("Mesaj gönderilemedi: "+error.message);}
+  finally{$("send-btn").disabled=false;}
+}
+async function subscribeMessages(){
+  if(chatChannel) await db.removeChannel(chatChannel);
+  chatChannel=db.channel("messages-live")
+    .on("postgres_changes",{event:"*",schema:"public",table:"messages"},loadMessages)
+    .subscribe();
+}
+async function logout(){
+  await leaveVoice();
+  if(onlineChannel) await db.removeChannel(onlineChannel);
+  if(voicePresenceChannel) await db.removeChannel(voicePresenceChannel);
+  if(chatChannel) await db.removeChannel(chatChannel);
+  await db.auth.signOut();
+  currentUser=null; currentUsername=null; location.reload();
+}
+
+
+// Hesap işlemleri sadece kullanıcı etkileşimiyle başlatılır.
+const TURNSTILE_SITE_KEY="0x4AAAAAAGGKEwfNQTK39Muf";
+function setAuthMode(mode){
+  authMode=mode;
+  document.querySelectorAll("[data-auth]").forEach(b=>b.classList.toggle("active",b.dataset.auth===mode));
+  document.querySelectorAll(".auth-pane").forEach(p=>p.classList.toggle("active",p.id==="pane-"+mode));
+  $("auth-error").textContent="";
+  $("auth-turnstile").style.display=mode==="guest"?"none":"flex";
+  if(mode!=="guest") initTurnstile();
+}
+function initTurnstile(){
+  if(turnstileWidgetId!==null || !window.turnstile) return;
+  turnstileWidgetId=window.turnstile.render("#auth-turnstile",{sitekey:TURNSTILE_SITE_KEY,theme:"dark"});
+}
+function getCaptcha(){return turnstileWidgetId===null?null:window.turnstile?.getResponse(turnstileWidgetId);}
+function resetCaptcha(){if(turnstileWidgetId!==null) window.turnstile?.reset(turnstileWidgetId);}
+async function accountRequest(path,username,password){
+  const turnstileToken=getCaptcha();
+  if(!turnstileToken) throw new Error("Önce güvenlik doğrulamasını tamamla.");
+  const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password,turnstileToken})});
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok) throw new Error(result.error||"Sunucu hatası ("+response.status+")");
+  return result;
+}
+async function registerAccount(){
+  const username=$("register-name").value.trim(),password=$("register-password").value;
+  if(!/^[a-zA-Z0-9_]{3,20}$/.test(username)||password.length<6||password.length>128){$("auth-error").textContent="Kullanıcı adı 3–20, şifre 6–128 karakter olmalı.";return;}
+  const btn=$("register-btn");btn.disabled=true;$("auth-error").textContent="";
+  try{
+    await accountRequest("/api/register",username,password);
+    toast("Hesap oluşturuldu. Şimdi giriş yapabilirsin.");
+    $("registered-name").value=username;
+    $("register-password").value="";
+    setAuthMode("registered");
+  }catch(error){$("auth-error").textContent=error.message;}
+  finally{btn.disabled=false;resetCaptcha();}
+}
+async function loginAccount(){
+  const username=$("registered-name").value.trim(),password=$("registered-password").value;
+  const btn=$("registered-login-btn");btn.disabled=true;$("auth-error").textContent="";
+  try{
+    const result=await accountRequest("/api/login",username,password);
+    if(!result.access_token||!result.refresh_token) throw new Error("Oturum bilgileri eksik.");
+    const {data,error}=await db.auth.setSession({access_token:result.access_token,refresh_token:result.refresh_token});
+    if(error||!data.user) throw error||new Error("Oturum açılamadı.");
+    const {error:profileError}=await db.from("profiles").upsert({user_id:data.user.id,username},{onConflict:"user_id"});
+    if(profileError) throw profileError;
+    currentUser=data.user;currentUsername=username;accountType="registered";
+    showApp();
+    await startOnlinePresence();await subscribeVoicePresence();await loadMessages();await subscribeMessages();
+    toast("Hoş geldin, "+username+"!");
+  }catch(error){$("auth-error").textContent=error.message;}
+  finally{btn.disabled=false;$("registered-password").value="";resetCaptcha();}
+}
+document.querySelectorAll("[data-auth]").forEach(b=>b.addEventListener("click",()=>setAuthMode(b.dataset.auth)));
+$("register-btn").addEventListener("click",registerAccount);
+$("registered-login-btn").addEventListener("click",loginAccount);
+$("registered-password").addEventListener("keydown",e=>{if(e.key==="Enter")loginAccount();});
+$("register-password").addEventListener("keydown",e=>{if(e.key==="Enter")registerAccount();});
+
+$("login-btn").addEventListener("click",login);
+$("guest-name").addEventListener("keydown",event=>{if(event.key==="Enter") login();});
+$("send-btn").addEventListener("click",sendMessage);
+$("msg").addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();sendMessage();}});
+$("join-btn").addEventListener("click",joinVoice);
+$("mute-btn").addEventListener("click",toggleMute);
+$("leave-btn").addEventListener("click",leaveVoice);
+$("logout-btn").addEventListener("click",logout);
+document.querySelectorAll("[data-room]").forEach(button=>button.addEventListener("click",()=>selectRoom(button.dataset.room)));
+
+// Sekme kapanırken Presence bağlantısı kesilir; Supabase Presence de bağlantı kaybını temizler.
+window.addEventListener("pagehide",()=>{
+  try{if(livekitRoom) livekitRoom.disconnect();}catch{}
+});
+
+(async()=>{await restoreSession();})();
+</script>
 </body>
 </html>
