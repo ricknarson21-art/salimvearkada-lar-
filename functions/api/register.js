@@ -156,18 +156,24 @@ export async function onRequestPost({ request, env }) {
       }
     );
 
-    if (!profile.ok) {
-      console.error(
-        "registered_accounts insert failed",
-        profile.status
-      );
+    
+if (!profile.ok) {
+  const profileError = await profile.text();
 
-      await rollback();
+  console.error(
+    "registered_accounts insert failed",
+    profile.status,
+    profileError
+  );
 
-      return json({
-        error: "Kayıt tamamlanamadı."
-      }, 500);
-    }
+  await rollback();
+
+  return json({
+    error: "Kayıt tamamlanamadı.",
+    detail: profileError
+  }, 500);
+}
+
 
     const role = await fetch(
       SUPABASE_URL + "/rest/v1/account_roles",
