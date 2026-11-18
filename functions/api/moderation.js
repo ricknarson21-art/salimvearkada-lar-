@@ -28,6 +28,49 @@ async function dbCall(secret, table, query, method = "GET", body) {
   if (res.status === 204 || res.status === 205) return null;
   return res.json().catch(() => null);
 }
+async function authAdmin(secret, method, id, body) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(id)}`, {
+    method,
+    headers:adminHeaders(secret),
+    ...(body===undefined ? {} : {body:JSON.stringify(body)})
+  });
+  if(!res.ok){
+    console.error("Auth yönetim hatası",method,res.status);
+    throw new Error("Supabase hesap işlemi reddedildi ("+res.status+")");
+  }
+  return res.json().catch(()=>null);
+}
+async function bannedRecord(secret, userId) {
+  const rows=await dbCall(secret,"server_bans",`?select=user_id,status&user_id=eq.${encodeURIComponent(userId)}&limit=1`);
+  return rows?.[0] || null;
+}
+async function upsertBan(secret, id, username, status, actor) {
+  const url=`${SUPABASE_URL}/rest/v1/server_bans?on_conflict=user_id`;
+  const res=await fetch(url,{
+    method:"POST",headers:adminHeaders(secret,{Prefer:"resolution=merge-duplicates,return=minimal"}),
+    body:JSON.stringify({user_id:id, username, status, actor_user_id:actor, created_at:new Date().toISOString()})
+  });
+  if(!res.ok){console.error("Ban kaydı eklenemedi",res.status);throw new Error("Ban veritabanı güncellenemedi");}
+}
+async function removeBan(secret,id){
+  await dbCall(secret,"server_bans",`?user_id=eq.${encodeURIComponent(id)}`,"DELETE");
+}
+async function removeFromAllVoiceRooms(env,id){
+  const failed=[];
+  for(const room of ROOMS){
+    try{
+      const current=await roomCall(env,"ListParticipants",room,{room});
+      if((current.participants||[]).some(p=>p.identity===id)){
+        await roomCall(env,"RemoveParticipant",room,{room,identity:id});
+      }
+    }catch(error){
+      // Oda henüz oluşturulmamış olabilir. Ban veritabanı işlemine dokunma.
+      console.warn("Ban sırasında ses odası kontrol edilemedi",room,error?.message);
+      failed.push(room);
+    }
+  }
+  return failed;
+}
 async function identify(request, env) {
   const bearer = request.headers.get("Authorization") || "";
   const token = bearer.startsWith("Bearer ") ? bearer.slice(7).trim() : "";
@@ -93,14 +136,22 @@ async function handler(request, env, isPost) {
     if(!user) return reply({error:"Giriş yapmalısın"},401);
     const {secret} = settings(env);
     const role = await roleOf(secret,user.id);
+    if(await bannedRecord(secret,user.id)) {
+      return reply({error:"Bu hesap sunucudan uzaklaştırıldı.",code:"ACCOUNT_BANNED"},403);
+    }
     if(!isPost) {
       if(role === "member") return reply({role});
-      const [accounts,roles] = await Promise.all([
+      const [accounts,roles,bans] = await Promise.all([
         dbCall(secret,"registered_accounts","?select=user_id,username&order=username.asc&limit=500"),
-        dbCall(secret,"account_roles","?select=user_id,role&limit=500")
+        dbCall(secret,"account_roles","?select=user_id,role&limit=500"),
+        dbCall(secret,"server_bans","?select=user_id,status&limit=1000")
       ]);
       const roleMap = new Map((roles||[]).map(r=>[r.user_id,r.role]));
-      return reply({role, accounts:(accounts||[]).map(a=>({user_id:a.user_id,username:a.username,role:roleMap.get(a.user_id)||"member"}))});
+      const banMap = new Map((bans||[]).map(r=>[r.user_id,r.status]));
+      return reply({role, accounts:(accounts||[]).map(a=>({
+        user_id:a.user_id,username:a.username,role:roleMap.get(a.user_id)||"member",
+        banned:banMap.get(a.user_id)==="banned"
+      }))});
     }
     if(role === "member") return reply({error:"Bu işlem için admin veya kurucu yetkisi gerekiyor"},403);
     const data=await request.json().catch(()=>null);
@@ -117,11 +168,62 @@ async function handler(request, env, isPost) {
     const targetRole = await roleOf(secret,targetUserId);
     if(!higher(role,targetRole)) return reply({error:"Bu kullanıcının yetki seviyesi korunuyor"},403);
 
+    if(["ban_user","unban_user","delete_account"].includes(data.action)) {
+      // Bütün hesap düzeyi ve geri alınamaz işlemler sadece kurucuya açık.
+      if(role!=="owner") return reply({error:"Bu işlemi yalnızca kurucu yapabilir"},403);
+      const accounts=await dbCall(secret,"registered_accounts",`?select=user_id,username&user_id=eq.${encodeURIComponent(targetUserId)}&limit=1`);
+      const target=accounts?.[0];
+      if(!target) return reply({error:"Kayıtlı hesap bulunamadı"},404);
+      const currentBan=await bannedRecord(secret,targetUserId);
+      if(data.action==="ban_user") {
+        if(currentBan) return reply({success:true,message:"Hesap zaten yasaklı"});
+        await upsertBan(secret,targetUserId,target.username,"banned",user.id);
+        try{
+          await authAdmin(secret,"PUT",targetUserId,{ban_duration:"876000h"});
+        }catch(error){
+          // Auth güncellenemezse tabloyu eski haline döndür.
+          await removeBan(secret,targetUserId).catch(e=>console.error("Ban rollback",e));
+          throw error;
+        }
+        const failed=await removeFromAllVoiceRooms(env,targetUserId);
+        return reply({success:true,message:failed.length
+          ?"Hesap banlandı. Bazı açık ses odaları kontrol edilemedi."
+          :"Hesap banlandı ve ses odalarından çıkarıldı."});
+      }
+      if(data.action==="unban_user") {
+        if(!currentBan || currentBan.status!=="banned") return reply({error:"Bu hesap banlı değil"},409);
+        await authAdmin(secret,"PUT",targetUserId,{ban_duration:"none"});
+        await removeBan(secret,targetUserId);
+        return reply({success:true,message:"Hesabın banı kaldırıldı"});
+      }
+      // Silme işlemi için tarayıcıdan doğrulanan isim sunucuda da denetlenir.
+      if(data.confirmUsername!==target.username) return reply({error:"Silme onayı kullanıcı adıyla eşleşmiyor"},400);
+      await upsertBan(secret,targetUserId,target.username,"deleted",user.id);
+      await removeFromAllVoiceRooms(env,targetUserId);
+      try{
+        await authAdmin(secret,"DELETE",targetUserId,{should_soft_delete:false});
+      }catch(error){
+        // FK engeli oluşursa erişim kapalı kalsın ve kullanıcı yönetim listesinde görünsün.
+        await upsertBan(secret,targetUserId,target.username,"banned",user.id);
+        return reply({error:"Hesap silinemedi; güvenlik için banlı bırakıldı. İlişkili tablolar veya Auth izinleri kontrol edilmeli."},502);
+      }
+      // Bazı kurulumlarda bu kayıtlar FK ile kendiliğinden silinir; kalanları temizle.
+      const relation=["messages","profiles","account_roles","registered_accounts"];
+      const unclean=[];
+      for(const table of relation){
+        try{await dbCall(secret,table,`?user_id=eq.${encodeURIComponent(targetUserId)}`,"DELETE");}
+        catch(error){unclean.push(table);console.error("Hesap silme temizliği",table,error);}
+      }
+      return reply({success:true,message:unclean.length
+        ?"Hesap silindi; bazı ilişkili kayıtlar temizlenemedi: "+unclean.join(", ")
+        :"Hesap kalıcı olarak silindi."});
+    }
     if(data.action==="set_role") {
       if(role!=="owner") return reply({error:"Admin atamasını yalnızca kurucu yapabilir"},403);
       if(!["admin","member"].includes(data.newRole)) return reply({error:"Geçersiz yetki"},400);
       const accounts=await dbCall(secret,"registered_accounts",`?select=user_id&user_id=eq.${encodeURIComponent(targetUserId)}&limit=1`);
       if(!accounts?.length) return reply({error:"Yalnızca kayıtlı üyeye admin yetkisi verilebilir"},404);
+      if(await bannedRecord(secret,targetUserId)) return reply({error:"Banlı hesabın yetkisi değiştirilemez"},409);
       const changed=await dbCall(secret,"account_roles",`?user_id=eq.${encodeURIComponent(targetUserId)}`,"PATCH",{role:data.newRole});
       if(!Array.isArray(changed)||changed.length!==1) return reply({error:"Yetki kaydı güncellenemedi"},409);
       return reply({success:true,message:data.newRole==="admin"?"Admin yetkisi verildi":"Admin yetkisi kaldırıldı"});
