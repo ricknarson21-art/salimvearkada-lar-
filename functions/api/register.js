@@ -207,9 +207,9 @@ export async function onRequestPost({ request, env }) {
 
   return json({
     error: "Kayıt işlemi başarısız.",
-    detail: error instanceof Error
-      ? error.name
-      : "UnknownError"
+     detail: error instanceof Error
+  ? error.message
+  : "UnknownError"
   }, 500);
 }
 }
