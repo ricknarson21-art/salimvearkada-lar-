@@ -144,7 +144,7 @@
         </form>
         <div id="music-session" hidden>
           <p class="statusline">🎵 Müzik Botu bu odada</p>
-          <button id="music-listen" type="button">YouTube oynatıcısını aç</button>
+          <p class="statusline">Tarayıcı otomatik başlatmazsa YouTube oynatıcısındaki oynat düğmesine bas.</p>
           <div id="music-player"></div>
         </div>
       </section>
@@ -215,6 +215,9 @@ let musicPollTimer = null;
 let musicPollPending = false;
 let musicScope = null;
 let musicSession = null;
+let musicYouTubeApi = null;
+let musicYouTubePlayer = null;
+const MUSIC_BOT_ID = "birartibir-room-music";
 let muted = false;
 let muteChanging = false;
 let joiningVoice = false;
@@ -442,6 +445,7 @@ function renderSidebarVoiceUsers(){
   if(livekitRoom && currentUser){
     // Bağlıyken LiveKit, oda katılımcılarının asıl kaynağıdır.
     people.set(currentUser.id,{user_id:currentUser.id,username:currentUsername,muted});
+    if(musicSession) people.set(MUSIC_BOT_ID,{user_id:MUSIC_BOT_ID,username:"🎵 Müzik Botu"});
     const onlineNames=new Map(uniquePresencePeople(onlineChannel).map(p=>[p.user_id,p.username]));
     for(const participant of livekitRoom.remoteParticipants.values()){
       const id=participant.identity;
@@ -481,6 +485,7 @@ function renderSidebarVoiceUsers(){
   list.forEach((person,index)=>{
     let row=existing.get(person.user_id);
     const isSelf=person.user_id===currentUser?.id;
+    const isMusicBot=person.user_id===MUSIC_BOT_ID;
     if(!row){
       row=document.createElement("div");row.className="sidebar-person";
       row.dataset.userId=person.user_id;
@@ -488,7 +493,7 @@ function renderSidebarVoiceUsers(){
       const details=document.createElement("div");details.className="voice-person-body";
       const name=document.createElement("strong");name.className="voice-person-name";
       details.appendChild(name);
-      if(!isSelf && livekitRoom){
+      if(!isSelf && !isMusicBot && livekitRoom){
         const control=document.createElement("label");control.className="voice-volume";
         const slider=document.createElement("input");
         slider.type="range";slider.min="0";slider.max="100";slider.step="5";
@@ -511,10 +516,10 @@ function renderSidebarVoiceUsers(){
     row.querySelector(".avatar").textContent=initials(person.username);
     row.querySelector(".voice-person-name").textContent=person.username||"Arkadaş";
     const mic=row.querySelector(".mic-status");
-    mic.innerHTML=person.muted ? mutedMicIconSvg() : "🎙️";
-    mic.title=person.muted ? "Mikrofon kapalı" : "Mikrofon açık";
+    mic.innerHTML=isMusicBot ? "🎵" : person.muted ? mutedMicIconSvg() : "🎙️";
+    mic.title=isMusicBot ? "Müzik botu aktif" : person.muted ? "Mikrofon kapalı" : "Mikrofon açık";
     // Odaya yeni bağlanılınca (liste önce bağlanmadan görünmüş olabilir) kontrol ekle.
-    if(!isSelf && livekitRoom && !row.querySelector(".voice-volume")){
+    if(!isSelf && !isMusicBot && livekitRoom && !row.querySelector(".voice-volume")){
       const details=row.querySelector(".voice-person-body");
       const control=document.createElement("label");control.className="voice-volume";
       const slider=document.createElement("input");slider.type="range";
@@ -532,7 +537,7 @@ function renderSidebarVoiceUsers(){
     if((isSelf || !livekitRoom) && row.querySelector(".voice-volume")){
       row.querySelector(".voice-volume").remove();
     }
-    ensureModeratorActions(row,person);
+    if(!isMusicBot) ensureModeratorActions(row,person);
     if(box.children[index]!==row)box.insertBefore(row,box.children[index]||null);
   });
 }
@@ -932,17 +937,44 @@ function renderMusicSession(session, serverNow){
     key, videoId:session.video_id,
     age:Math.max(0,serverNow-Date.parse(session.started_at)), receivedAt:performance.now()
   } : null;
+  if(musicYouTubePlayer) musicYouTubePlayer.destroy();
+  musicYouTubePlayer=null;
   $("music-player").replaceChildren();
-  $("music-listen").hidden=false;
   $("music-session").hidden=!musicSession;
   $("music-stop").disabled=!musicSession || musicCommandPending;
+  if(musicSession) openMusicPlayer();
+  renderSidebarVoiceUsers();
+}
+
+function musicElapsed(session){
+  return (session.age+performance.now()-session.receivedAt)/1000;
+}
+
+function loadMusicYouTubeApi(){
+  if(window.YT?.Player) return Promise.resolve(window.YT);
+  if(!musicYouTubeApi){
+    musicYouTubeApi=new Promise(resolve=>{
+      window.onYouTubeIframeAPIReady=()=>resolve(window.YT);
+      const script=document.createElement("script");
+      script.src="https://www.youtube.com/iframe_api";
+      script.onerror=()=>{
+        musicYouTubeApi=null;
+        resolve(null);
+      };
+      document.head.appendChild(script);
+    });
+  }
+  return musicYouTubeApi;
 }
 
 function openMusicPlayer(){
-  if(!musicSession || !livekitRoom) return;
-  const elapsed=Math.floor((musicSession.age+performance.now()-musicSession.receivedAt)/1000);
+  const session=musicSession;
+  if(!session || !livekitRoom) return;
+  const elapsed=Math.floor(musicElapsed(session));
   const url=new URL("https://www.youtube.com/embed/"+musicSession.videoId);
-  url.search=new URLSearchParams({autoplay:"1",start:String(elapsed),playsinline:"1"});
+  url.search=new URLSearchParams({
+    autoplay:"1",start:String(elapsed),playsinline:"1",enablejsapi:"1",origin:location.origin
+  });
   const frame=document.createElement("iframe");
   frame.title="Müzik Botu YouTube oynatıcısı";
   frame.src=url.href;
@@ -950,7 +982,20 @@ function openMusicPlayer(){
   frame.allowFullscreen=true;
   frame.referrerPolicy="strict-origin-when-cross-origin";
   $("music-player").replaceChildren(frame);
-  $("music-listen").hidden=true;
+  void loadMusicYouTubeApi().then(api=>{
+    if(!api || session!==musicSession || !frame.isConnected) return;
+    let aligned=false;
+    musicYouTubePlayer=new api.Player(frame,{
+      events:{onStateChange:({data,target})=>{
+        if(session!==musicSession || aligned || data!==api.PlayerState.PLAYING) return;
+        aligned=true;
+        const expected=musicElapsed(session);
+        if(expected<target.getDuration() && Math.abs(target.getCurrentTime()-expected)>2) {
+          target.seekTo(expected,true);
+        }
+      }}
+    });
+  }).catch(()=>{ /* The built-in YouTube player remains available. */ });
 }
 
 async function musicRequest(action,scope,url,signal){
@@ -958,7 +1003,7 @@ async function musicRequest(action,scope,url,signal){
   if(!session?.access_token) throw new Error("Önce giriş yapmalısın.");
   if(scope!==musicScope || signal.aborted) return;
   const response=await fetch("/api/music-bot",{
-    method:"POST",signal,
+    method:"POST",signal,cache:"no-store",
     headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
     body:JSON.stringify({action,roomName:scope.roomName,url})
   });
@@ -974,25 +1019,28 @@ async function refreshMusicSession(){
   const scope=musicScope;
   if(!scope || musicCommandPending || musicPollPending) return;
   musicPollPending=true;
-  const commandAtStart=scope.command;
+  const revision=scope.revision;
   try{
     const result=await musicRequest("state",scope,undefined,AbortSignal.any([
-      scope.controller.signal,AbortSignal.timeout(4000)
+      scope.controller.signal,AbortSignal.timeout(12000)
     ]));
-    if(result && scope===musicScope && !musicCommandPending && scope.command===commandAtStart){
+    if(result && scope===musicScope && !musicCommandPending && scope.revision===revision){
       renderMusicSession(result.session,result.now);
     }
   }catch{
     // Bir sonraki sorgu geçici bağlantı hatası sonrası oturumu yeniler.
   }finally{
-    if(scope===musicScope) musicPollPending=false;
+    if(scope===musicScope){
+      musicPollPending=false;
+      if(scope.revision!==revision) void refreshMusicSession();
+    }
   }
 }
 
 async function sendMusicCommand(action){
   const scope=musicScope;
   if(!scope || musicCommandPending) return;
-  scope.command=Symbol();
+  scope.revision++;
   musicCommandPending=true;
   renderVoiceButtons();
   try{
@@ -1006,6 +1054,7 @@ async function sendMusicCommand(action){
     if(scope===musicScope){
       musicCommandPending=false;
       renderVoiceButtons();
+      void refreshMusicSession();
     }
   }
 }
@@ -1020,7 +1069,7 @@ function syncMusicScope(connected){
   musicPollPending=false;
   renderMusicSession(null);
   if(connected){
-    musicScope={room:livekitRoom,roomName:selectedRoom,controller:new AbortController(),command:null};
+    musicScope={room:livekitRoom,roomName:selectedRoom,controller:new AbortController(),revision:0};
     musicPollTimer=setInterval(refreshMusicSession,4000);
     void refreshMusicSession();
   }
@@ -1078,6 +1127,11 @@ async function joinVoice(){
     if(!response.ok) throw new Error(result.error||"Ses bağlantısı kurulamadı.");
     room=new LivekitClient.Room();
     const activeRoom=room;
+    room.on(LivekitClient.RoomEvent.DataReceived,(_data,_sender,_kind,topic)=>{
+      if(musicScope?.room!==activeRoom || topic!=="birartibir.music.changed") return;
+      musicScope.revision++;
+      void refreshMusicSession();
+    });
     // LiveKit Cloud taşıma sırasında bağlantıyı kendisi yeni odaya geçirir.
     if(LivekitClient.RoomEvent.Moved){
       room.on(LivekitClient.RoomEvent.Moved,async newRoom=>{
@@ -1345,7 +1399,9 @@ $("music-form").addEventListener("submit",event=>{
   event.preventDefault();
   void sendMusicCommand("play");
 });
-$("music-listen").addEventListener("click",openMusicPlayer);
+document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden) void refreshMusicSession();
+});
 $("music-stop").addEventListener("click",()=>void sendMusicCommand("stop"));
 $("join-btn").addEventListener("click",joinVoice);
 $("mute-btn").addEventListener("click",toggleMute);

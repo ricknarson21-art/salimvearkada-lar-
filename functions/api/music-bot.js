@@ -10,6 +10,7 @@ const reply = (body, status = 200) => Response.json(body, {
 async function stateRequest(env, method, filters, body) {
   const response = await fetch(STATE_URL + filters, {
     method,
+    cache: "no-store",
     headers: {
       apikey: env.SUPABASE_SECRET_KEY.trim(),
       "Content-Type": "application/json",
@@ -27,7 +28,15 @@ async function inVoiceRoom(env, room, identity) {
   return result.participants?.some(participant => participant.identity === identity) ?? false;
 }
 
-export async function onRequestPost({ request, env }) {
+function notifyRooms(env, rooms, waitUntil) {
+  const notifications = Promise.allSettled(rooms.map(room => roomCall(env, "SendData", room, {
+    room, topic: "birartibir.music.changed", data: btoa("changed"),
+    kind: "RELIABLE", nonce: btoa(crypto.randomUUID())
+  })));
+  waitUntil(notifications);
+}
+
+export async function onRequestPost({ request, env, waitUntil = () => {} }) {
   try {
     const user = await authenticateVoiceUser(request, env);
     if (user instanceof Response) return user;
@@ -58,12 +67,14 @@ export async function onRequestPost({ request, env }) {
 
     if (action === "stop") {
       await stateRequest(env, "DELETE", `?slot=eq.1&room=eq.${room}`);
+      notifyRooms(env, [room], waitUntil);
       return reply({ session: null, now: Date.now() });
     }
 
     const session = await stateRequest(env, "POST", `?on_conflict=slot&select=${FIELDS}`, {
       slot: 1, room, video_id: videoId, started_at: new Date().toISOString()
     });
+    notifyRooms(env, [...ALLOWED_ROOMS], waitUntil);
     return reply({ session, now: Date.now() });
   } catch (error) {
     console.error("Music session:", error.message);
