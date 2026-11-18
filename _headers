@@ -1,0 +1,6 @@
+/desktop-update/latest.json
+  Cache-Control: no-store
+
+/desktop-update/BirArtiBir-Setup-Windows-x64-v0.5.0.exe
+  Content-Disposition: attachment; filename="BirArtiBir-Setup-Windows-x64-v0.5.0.exe"
+  Content-Type: application/octet-stream
