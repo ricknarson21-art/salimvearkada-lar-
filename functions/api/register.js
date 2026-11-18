@@ -83,7 +83,7 @@ export async function onRequestPost({ request, env }) {
 
     const headers = {
       apikey: env.SUPABASE_SECRET_KEY,
-      Authorization: "Bearer " + env.SUPABASE_SECRET_KEY,
+      Authorization: "Bearer " + env.SUPABASE_PUBLISHABLE_KEY,
       "Content-Type": "application/json"
     };
 
