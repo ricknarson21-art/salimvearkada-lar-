@@ -47,6 +47,7 @@ internal sealed class DesktopWindow : Form
     internal DesktopWindow()
     {
         Text = "Bir Artı Bir";
+        Icon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         ClientSize = new Size(1180, 800);
         MinimumSize = new Size(680, 520);
         StartPosition = FormStartPosition.CenterScreen;

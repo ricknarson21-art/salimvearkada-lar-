@@ -6,8 +6,9 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>BirArtiBir</AssemblyName>
-    <Version>0.5.0</Version>
+    <Version>0.5.1</Version>
     <Product>Bir Artı Bir</Product>
+    <ApplicationIcon>BirArtiBir.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>

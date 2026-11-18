@@ -4,6 +4,8 @@ RequestExecutionLevel user
 SetCompressor /SOLID lzma
 InstallDir "$LOCALAPPDATA\BirArtiBir\App"
 
+!define MUI_ICON "BirArtiBir.ico"
+!define MUI_UNICON "BirArtiBir.ico"
 !include "MUI2.nsh"
 !include "x64.nsh"
 
@@ -54,7 +56,7 @@ Section
   CreateShortcut "$SMPROGRAMS\Bir Artı Bir.lnk" "$INSTDIR\BirArtiBir.exe"
   CreateShortcut "$DESKTOP\Bir Artı Bir.lnk" "$INSTDIR\BirArtiBir.exe"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "Bir Artı Bir"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "0.5.0"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "0.5.1"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\BirArtiBir.exe"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "UninstallString" '"$INSTDIR\Kaldir.exe"'
