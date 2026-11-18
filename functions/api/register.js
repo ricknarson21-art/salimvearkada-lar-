@@ -83,7 +83,7 @@ export async function onRequestPost({ request, env }) {
 
     const headers = {
       apikey: env.SUPABASE_SECRET_KEY,
-      Authorization: "Bearer " + env.SUPABASE_PUBLISHABLE_KEY,
+      Authorization: "Bearer " + env.SUPABASE_SECRET_KEY,
       "Content-Type": "application/json"
     };
 
@@ -203,12 +203,10 @@ export async function onRequestPost({ request, env }) {
     }, 201);
 
   } catch (error) {
-  console.error("Registration error", error);
+    console.error("Registration error", error);
 
-  return json({
-    error: "Kayıt işlemi başarısız.",
-    detail: error instanceof Error
-      ? error.name
-      : "UnknownError"
-  }, 500);
+    return json({
+      error: "Kayıt işlemi başarısız."
+    }, 500);
+  }
 }
