@@ -136,6 +136,11 @@
           <button id="leave-btn" class="danger" disabled>Odadan ayrıl</button>
         </div>
         <p id="voice-status" class="statusline">Henüz sesli odaya katılmadın.</p>
+        <form id="music-form" class="chatrow">
+          <input id="music-url" type="url" maxlength="2048" aria-label="YouTube bağlantısı" placeholder="https://youtu.be/…" required disabled>
+          <button id="music-play" disabled>🎵 Botu çağır</button>
+          <button id="music-stop" type="button" class="muted-btn" disabled>Durdur</button>
+        </form>
       </section>
       <section class="card">
         <div class="chat-title-row"><h2>💬 Genel sohbet</h2><button type="button" id="clear-chat-btn">🧹 Sohbeti temizle</button></div>
@@ -199,6 +204,8 @@ let onlineChannel = null;
 let voicePresenceChannel = null;
 let chatChannel = null;
 let livekitRoom = null;
+let musicCommandPending = false;
+const MUSIC_BOT_ID = "birartibir-music-bot";
 let muted = false;
 let muteChanging = false;
 let joiningVoice = false;
@@ -497,6 +504,10 @@ function renderSidebarVoiceUsers(){
     const mic=row.querySelector(".mic-status");
     mic.innerHTML=person.muted ? mutedMicIconSvg() : "🎙️";
     mic.title=person.muted ? "Mikrofon kapalı" : "Mikrofon açık";
+    if(person.user_id===MUSIC_BOT_ID){
+      mic.textContent="🎵";
+      mic.title="Müzik botu";
+    }
     // Odaya yeni bağlanılınca (liste önce bağlanmadan görünmüş olabilir) kontrol ekle.
     if(!isSelf && livekitRoom && !row.querySelector(".voice-volume")){
       const details=row.querySelector(".voice-person-body");
@@ -636,6 +647,7 @@ async function actOnVoice(targetId, targetName, action, destinationRoom, button)
   finally{button.disabled=false;}
 }
 function ensureModeratorActions(row,person){
+  if(person.user_id===MUSIC_BOT_ID) return;
   const existing=row.querySelector(".mod-person-actions");
   const targetRole=moderationAccounts.find(a=>a.user_id===person.user_id)?.role||"member";
   const allowed=(moderationRole==="owner"&&targetRole!=="owner" ||
@@ -909,8 +921,39 @@ function notifyIncomingChat(){
   playNotificationSound("message");
 }
 
+async function sendMusicCommand(action){
+  if(!livekitRoom || joiningVoice || leavingVoice || roomChanging || musicCommandPending) return;
+  const room=livekitRoom;
+  const roomName=selectedRoom;
+  const url=$("music-url").value.trim();
+  musicCommandPending=true;
+  renderVoiceButtons();
+  try{
+    const {data:{session}}=await db.auth.getSession();
+    if(!session?.access_token) throw new Error("Önce giriş yapmalısın.");
+    if(room!==livekitRoom || roomName!==selectedRoom) return;
+    const response=await fetch("/api/music-bot",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
+      body:JSON.stringify({action,roomName,url})
+    });
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(result.error||"Müzik komutu başarısız.");
+    toast(action==="play" ? MOD_ROOMS[roomName]+" odasında müzik başladı." : "Müzik durduruldu.");
+  }catch(error){
+    toast(error.message);
+  }finally{
+    musicCommandPending=false;
+    renderVoiceButtons();
+  }
+}
+
 function renderVoiceButtons(){
   const connected=Boolean(livekitRoom);
+  const musicDisabled=!connected || joiningVoice || leavingVoice || roomChanging || musicCommandPending;
+  $("music-url").disabled=musicDisabled;
+  $("music-play").disabled=musicDisabled;
+  $("music-stop").disabled=musicDisabled;
   $("join-btn").disabled=connected || joiningVoice || leavingVoice || roomChanging;
   $("mute-btn").disabled=!connected || muteChanging || joiningVoice || leavingVoice;
   $("leave-btn").disabled=!connected || muteChanging || joiningVoice || leavingVoice;
@@ -1218,6 +1261,11 @@ $("login-btn").addEventListener("click",login);
 $("guest-name").addEventListener("keydown",event=>{if(event.key==="Enter") login();});
 $("send-btn").addEventListener("click",sendMessage);
 $("msg").addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();sendMessage();}});
+$("music-form").addEventListener("submit",event=>{
+  event.preventDefault();
+  void sendMusicCommand("play");
+});
+$("music-stop").addEventListener("click",()=>void sendMusicCommand("stop"));
 $("join-btn").addEventListener("click",joinVoice);
 $("mute-btn").addEventListener("click",toggleMute);
 $("leave-btn").addEventListener("click",leaveVoice);
