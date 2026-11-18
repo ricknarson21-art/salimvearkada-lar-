@@ -30,6 +30,10 @@ internal sealed class DesktopWindow : Form
     private readonly Timer keyboardTimer = new() { Interval = 20 };
     private readonly JavaScriptSerializer json = new();
     private readonly PushToTalk pushToTalk;
+    private readonly VoiceOverlay overlay = new();
+    private OverlaySnapshot? overlaySnapshot;
+    private readonly ToolStripMenuItem overlaySetting = new("Oyun göstergesi") { Checked = true, CheckOnClick = true };
+    private int overlayLastUpdate;
     private CoreWebView2? web;
     private bool? microphoneAllowed;
 
@@ -39,16 +43,31 @@ internal sealed class DesktopWindow : Form
         ClientSize = new Size(1180, 800);
         MinimumSize = new Size(680, 520);
         StartPosition = FormStartPosition.CenterScreen;
+        var menu = new MenuStrip();
+        var viewMenu = new ToolStripMenuItem("Görünüm");
+        viewMenu.DropDownItems.Add(overlaySetting);
+        menu.Items.Add(viewMenu);
+        MainMenuStrip = menu;
         Controls.Add(webView);
+        Controls.Add(menu);
+        overlaySetting.CheckedChanged += (_, _) => RefreshOverlay(force: true);
         pushToTalk = new PushToTalk(PostPushToTalk);
-        keyboardTimer.Tick += (_, _) => ReadForegroundKey();
+        keyboardTimer.Tick += (_, _) =>
+        {
+            ReadForegroundKey();
+            RefreshOverlay();
+        };
         Shown += async (_, _) => await InitializeSiteAsync();
         FormClosing += (_, _) =>
         {
             keyboardTimer.Stop();
             pushToTalk.Suspend();
         };
-        FormClosed += (_, _) => keyboardTimer.Dispose();
+        FormClosed += (_, _) =>
+        {
+            overlay.Dispose();
+            keyboardTimer.Dispose();
+        };
     }
 
     private async System.Threading.Tasks.Task InitializeSiteAsync()
@@ -69,7 +88,7 @@ internal sealed class DesktopWindow : Form
             {
                 if (IsSite(args.Uri))
                 {
-                    pushToTalk.Configure(null);
+                    ClearPageState();
                     return;
                 }
                 args.Cancel = true;
@@ -86,12 +105,14 @@ internal sealed class DesktopWindow : Form
                 if (!IsSite(args.Source) || !IsSite(web.Source)) return;
                 try
                 {
-                    var code = args.TryGetWebMessageAsString();
-                    pushToTalk.Configure(code.Length == 0 ? null : code);
+                    var message = args.TryGetWebMessageAsString();
+                    if (message.StartsWith("overlay:", StringComparison.Ordinal))
+                        ReceiveOverlay(message.Substring(8));
+                    else pushToTalk.Configure(message.Length == 0 ? null : message);
                 }
                 catch (ArgumentException) { }
             };
-            web.ProcessFailed += (_, _) => pushToTalk.Configure(null);
+            web.ProcessFailed += (_, _) => ClearPageState();
 
             using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("site-bridge.js")
                 ?? throw new InvalidOperationException("Web bağlantısı yüklenemedi.");
@@ -117,6 +138,42 @@ internal sealed class DesktopWindow : Form
                 Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
             Close();
         }
+    }
+
+    private void ClearPageState()
+    {
+        overlaySnapshot = null;
+        overlay.Hide();
+        pushToTalk.Configure(null);
+    }
+
+    private void ReceiveOverlay(string message)
+    {
+        if (message.Length > 12000) return;
+        var value = json.Deserialize<OverlaySnapshot>(message);
+        if (value?.People == null || value.People.Length > 12 || value.Count < value.People.Length ||
+            value.Room == null || value.Room.Length > 40) return;
+        foreach (var person in value.People)
+            if (person?.Name == null || person.Name.Length > 40) return;
+        overlaySnapshot = value;
+        if (value.Count > 0) overlay.SetSnapshot(value);
+        RefreshOverlay(force: true);
+    }
+
+    private void RefreshOverlay(bool force = false)
+    {
+        var now = Environment.TickCount;
+        if (!force && unchecked(now - overlayLastUpdate) < 200) return;
+        overlayLastUpdate = now;
+        var foreground = GetForegroundWindow();
+        if (!overlaySetting.Checked || overlaySnapshot == null || overlaySnapshot.Count == 0 ||
+            foreground == IntPtr.Zero || foreground == Handle || !GetWindowRect(foreground, out var bounds))
+        {
+            overlay.Hide();
+            return;
+        }
+        var screen = Screen.FromHandle(foreground).Bounds;
+        overlay.ShowOn(Rectangle.FromLTRB(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom), screen);
     }
 
     private void HandlePermission(CoreWebView2PermissionRequestedEventArgs args)
@@ -174,6 +231,16 @@ internal sealed class DesktopWindow : Form
         }
         catch (System.ComponentModel.Win32Exception) { }
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowRect
+    {
+        internal int Left, Top, Right, Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr window, out WindowRect rectangle);
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int virtualKey);
