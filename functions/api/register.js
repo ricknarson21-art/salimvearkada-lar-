@@ -1,4 +1,11 @@
 
+export async function onRequestPost() {
+  return Response.json(
+    { error: "Kayıt sistemi henüz hazırlanıyor." },
+    { status: 503 }
+  );
+}
+
 const SUPABASE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co";
 
 const json = (data, status = 200) =>
