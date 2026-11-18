@@ -192,20 +192,7 @@ async function subscribeVoicePresence(roomName=selectedRoom){
   await subscribeAndWait(voicePresenceChannel,"Ses odası listesi");
   renderSidebarVoiceUsers();
 }
-function renderSidebarVoiceUsers(){
-  const box=$("sidebar-voice-users"); if(!box) return;
-  box.replaceChildren();
-  const people=uniquePresencePeople(voicePresenceChannel);
-  setText("voice-count","("+people.length+")");
-  if(!people.length){box.innerHTML='<div class="empty">Bu odada henüz kimse yok.</div>';return;}
-  people.sort((a,b)=>(a.username||"").localeCompare(b.username||"","tr"));
-  for(const person of people){
-    const row=document.createElement("div"); row.className="sidebar-person"+(activeSpeakerIds.has(person.user_id)?" speaking":"");
-    const avatar=document.createElement("div"); avatar.className="avatar"; avatar.textContent=initials(person.username);
-    const name=document.createElement("strong"); name.textContent=person.username||"Misafir";
-    row.append(avatar,name); box.append(row);
-  }
-}
+
 async function selectRoom(roomName){
   if(!["genel","oyun","muhabbet"].includes(roomName)) return;
   if(livekitRoom){toast("Önce bulunduğun ses odasından ayrılmalısın.");return;}
