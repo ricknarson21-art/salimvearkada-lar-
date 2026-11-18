@@ -145,6 +145,7 @@
         <div id="music-session" hidden>
           <p class="statusline">🎵 Müzik Botu bu odada</p>
           <p class="statusline">Tarayıcı otomatik başlatmazsa YouTube oynatıcısındaki oynat düğmesine bas.</p>
+          <button id="music-unmute" type="button" hidden>Müziğin sesini aç</button>
           <div id="music-player"></div>
         </div>
       </section>
@@ -217,6 +218,9 @@ let musicScope = null;
 let musicSession = null;
 let musicYouTubeApi = null;
 let musicYouTubePlayer = null;
+let musicSeekTimer = null;
+let musicSeekSample = null;
+let musicSeekIgnoreUntil = 0;
 const MUSIC_BOT_ID = "birartibir-room-music";
 let muted = false;
 let muteChanging = false;
@@ -933,10 +937,21 @@ function notifyIncomingChat(){
 function renderMusicSession(session, serverNow){
   const key=session ? session.room+"/"+session.video_id+"/"+session.started_at : null;
   if(key===musicSession?.key || (!key && !musicSession)) return;
-  musicSession=session ? {
-    key, videoId:session.video_id,
+  const next=session ? {
+    key, videoId:session.video_id, startedAt:session.started_at,
     age:Math.max(0,serverNow-Date.parse(session.started_at)), receivedAt:performance.now()
   } : null;
+  if(next && musicSession?.videoId===next.videoId){
+    Object.assign(musicSession,next);
+    if(musicYouTubePlayer?.getDuration) alignMusicPlayer(musicYouTubePlayer,musicSession);
+    return;
+  }
+  musicSession=next;
+  clearInterval(musicSeekTimer);
+  musicSeekTimer=null;
+  musicSeekSample=null;
+  musicSeekIgnoreUntil=0;
+  $("music-unmute").hidden=true;
   if(musicYouTubePlayer) musicYouTubePlayer.destroy();
   musicYouTubePlayer=null;
   $("music-player").replaceChildren();
@@ -948,6 +963,34 @@ function renderMusicSession(session, serverNow){
 
 function musicElapsed(session){
   return (session.age+performance.now()-session.receivedAt)/1000;
+}
+
+function alignMusicPlayer(player,session){
+  const expected=musicElapsed(session);
+  if(expected>=player.getDuration() || Math.abs(player.getCurrentTime()-expected)<=2) return;
+  musicSeekSample=null;
+  musicSeekIgnoreUntil=performance.now()+2000;
+  player.seekTo(expected,true);
+}
+
+function detectMusicSeek(player,session,states){
+  if(session!==musicSession || musicCommandPending || performance.now()<musicSeekIgnoreUntil) return;
+  const state=player.getPlayerState();
+  if(state===states.BUFFERING) return;
+  if(state!==states.PLAYING && state!==states.PAUSED){
+    musicSeekSample=null;
+    return;
+  }
+  const position=player.getCurrentTime();
+  const now=performance.now();
+  if(!Number.isFinite(position)) return;
+  const previous=musicSeekSample;
+  musicSeekSample={position,now,state};
+  if(!previous || now-previous.now>4000) return;
+  const progressed=previous.state===states.PLAYING ? (now-previous.now)/1000 : 0;
+  if(Math.abs(position-previous.position-progressed)>2.5){
+    void sendMusicCommand("seek",{videoId:session.videoId,startedAt:session.startedAt,position});
+  }
 }
 
 function loadMusicYouTubeApi(){
@@ -986,26 +1029,38 @@ function openMusicPlayer(){
     if(!api || session!==musicSession || !frame.isConnected) return;
     let aligned=false;
     musicYouTubePlayer=new api.Player(frame,{
-      events:{onStateChange:({data,target})=>{
-        if(session!==musicSession || aligned || data!==api.PlayerState.PLAYING) return;
-        aligned=true;
-        const expected=musicElapsed(session);
-        if(expected<target.getDuration() && Math.abs(target.getCurrentTime()-expected)>2) {
-          target.seekTo(expected,true);
+      events:{
+        onReady:({target})=>{
+          if(session!==musicSession) return;
+          target.playVideo();
+          musicSeekTimer=setInterval(()=>detectMusicSeek(target,session,api.PlayerState),400);
+        },
+        onAutoplayBlocked:({target})=>{
+          if(session!==musicSession || target.isMuted()) return;
+          target.mute();
+          $("music-unmute").hidden=false;
+          target.playVideo();
+        },
+        onStateChange:({data,target})=>{
+          if(session!==musicSession || data!==api.PlayerState.PLAYING) return;
+          if(!target.isMuted?.()) $("music-unmute").hidden=true;
+          if(aligned) return;
+          aligned=true;
+          alignMusicPlayer(target,session);
         }
-      }}
+      }
     });
   }).catch(()=>{ /* The built-in YouTube player remains available. */ });
 }
 
-async function musicRequest(action,scope,url,signal){
+async function musicRequest(action,scope,details,signal){
   const {data:{session}}=await db.auth.getSession();
   if(!session?.access_token) throw new Error("Önce giriş yapmalısın.");
   if(scope!==musicScope || signal.aborted) return;
   const response=await fetch("/api/music-bot",{
     method:"POST",signal,cache:"no-store",
     headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
-    body:JSON.stringify({action,roomName:scope.roomName,url})
+    body:JSON.stringify({action,roomName:scope.roomName,...details})
   });
   const result=await response.json().catch(()=>({}));
   if(response.status===401 || response.status===403){
@@ -1037,14 +1092,14 @@ async function refreshMusicSession(){
   }
 }
 
-async function sendMusicCommand(action){
+async function sendMusicCommand(action,details={url:$("music-url").value.trim()}){
   const scope=musicScope;
   if(!scope || musicCommandPending) return;
   scope.revision++;
   musicCommandPending=true;
   renderVoiceButtons();
   try{
-    const result=await musicRequest(action,scope,$("music-url").value.trim(),AbortSignal.any([
+    const result=await musicRequest(action,scope,details,AbortSignal.any([
       scope.controller.signal,AbortSignal.timeout(10000)
     ]));
     if(result && scope===musicScope) renderMusicSession(result.session,result.now);
@@ -1398,6 +1453,12 @@ $("msg").addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shift
 $("music-form").addEventListener("submit",event=>{
   event.preventDefault();
   void sendMusicCommand("play");
+});
+$("music-unmute").addEventListener("click",()=>{
+  if(!musicYouTubePlayer) return;
+  musicYouTubePlayer.unMute();
+  musicYouTubePlayer.playVideo();
+  $("music-unmute").hidden=true;
 });
 document.addEventListener("visibilitychange",()=>{
   if(!document.hidden) void refreshMusicSession();

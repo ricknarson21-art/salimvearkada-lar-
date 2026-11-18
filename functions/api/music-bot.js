@@ -14,7 +14,8 @@ async function stateRequest(env, method, filters, body) {
     headers: {
       apikey: env.SUPABASE_SECRET_KEY.trim(),
       "Content-Type": "application/json",
-      ...(method === "POST" ? { Prefer: "resolution=merge-duplicates,return=representation" } : {})
+      ...(method === "POST" ? { Prefer: "resolution=merge-duplicates,return=representation" } : {}),
+      ...(method === "PATCH" ? { Prefer: "return=representation" } : {})
     },
     ...(body ? { body: JSON.stringify(body) } : {})
   });
@@ -44,7 +45,7 @@ export async function onRequestPost({ request, env, waitUntil = () => {} }) {
     const body = await request.json().catch(() => null);
     const room = body?.roomName;
     const action = body?.action;
-    if (!ALLOWED_ROOMS.has(room) || !["state", "play", "stop"].includes(action)) {
+    if (!ALLOWED_ROOMS.has(room) || !["state", "play", "stop", "seek"].includes(action)) {
       return reply({ error: "Geçersiz müzik komutu veya ses odası." }, 400);
     }
 
@@ -63,6 +64,25 @@ export async function onRequestPost({ request, env, waitUntil = () => {} }) {
 
     if (!await inVoiceRoom(env, room, user.id)) {
       return reply({ error: "Önce bu ses odasına katıl." }, 403);
+    }
+
+    if (action === "seek") {
+      const { videoId: currentVideo, startedAt, position } = body;
+      if (typeof currentVideo !== "string" || !/^[A-Za-z0-9_-]{11}$/.test(currentVideo)
+          || typeof startedAt !== "string" || !Number.isFinite(Date.parse(startedAt))
+          || !Number.isFinite(position) || position < 0 || position > 43200) {
+        return reply({ error: "Geçersiz oynatma konumu." }, 400);
+      }
+      const filters = new URLSearchParams({
+        slot: "eq.1", room: `eq.${room}`, video_id: `eq.${currentVideo}`,
+        started_at: `eq.${new Date(startedAt).toISOString()}`, select: FIELDS
+      });
+      const session = await stateRequest(env, "PATCH", "?" + filters, {
+        started_at: new Date(Date.now() - position * 1000).toISOString()
+      });
+      if (!session) return reply({ error: "Müzik oturumu değişti." }, 409);
+      notifyRooms(env, [room], waitUntil);
+      return reply({ session, now: Date.now() });
     }
 
     if (action === "stop") {
