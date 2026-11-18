@@ -135,6 +135,7 @@ let voicePresenceChannel = null;
 let chatChannel = null;
 let livekitRoom = null;
 let muted = false;
+let muteChanging = false;
 let leavingVoice = false;
 let selectedRoom = "genel";
 let activeSpeakerIds = new Set();
@@ -154,8 +155,23 @@ function showApp(){
   setText("connection-state","Bağlandı");
 }
 function uniquePresencePeople(channel){
-  const all=Object.values(channel?.presenceState?.() || {}).flat();
-  return [...new Map(all.filter(p=>p && p.user_id).map(p=>[p.user_id,p])).values()];
+  const state = channel?.presenceState?.() || {};
+  const people = new Map();
+
+  // Aynı kullanıcıya ait birden fazla Presence kaydı varsa en yeni durumu seç.
+  for (const metas of Object.values(state)) {
+    if (!Array.isArray(metas)) continue;
+    for (const person of metas) {
+      if (!person || !person.user_id) continue;
+      const previous = people.get(person.user_id);
+      const personTime = Number(person.updated_at) || 0;
+      const previousTime = Number(previous?.updated_at) || 0;
+      if (!previous || personTime >= previousTime) {
+        people.set(person.user_id, person);
+      }
+    }
+  }
+  return [...people.values()];
 }
 
 // Siteye giriş yapan herkes yalnızca ortadaki "Çevrimiçi arkadaşlar" alanında görünür.
@@ -351,7 +367,8 @@ async function joinVoice(){
   user_id:currentUser.id,
   username:currentUsername,
   room_name:selectedRoom,
-  muted:false
+  muted:false,
+  updated_at:Date.now()
 });
       if(presenceStatus && presenceStatus!=="ok") console.warn("Ses odası Presence track sonucu:",presenceStatus);
     }
@@ -379,34 +396,51 @@ function mutedMicIconSvg(){
   </svg>`;
 }
 async function toggleMute(){
-  if(!livekitRoom) return;
+  if(!livekitRoom || muteChanging) return;
+
+  const button = $("mute-btn");
+  const previousMuted = muted;
+  const nextMuted = !previousMuted;
+
+  muteChanging = true;
+  button.disabled = true;
 
   try{
-    const nextMuted = !muted;
-
     await livekitRoom.localParticipant.setMicrophoneEnabled(!nextMuted);
-
     muted = nextMuted;
 
-    $("mute-btn").innerHTML = muted
-  ? mutedMicIconSvg() + " Mikrofonu aç"
-  : "🎙 Mikrofonu kapat";
-    
+    button.innerHTML = muted
+      ? mutedMicIconSvg() + " Mikrofonu aç"
+      : "🎙 Mikrofonu kapat";
+
     if(voicePresenceChannel && currentUser){
-      await voicePresenceChannel.track({
+      const presenceStatus = await voicePresenceChannel.track({
         user_id:currentUser.id,
         username:currentUsername,
         room_name:selectedRoom,
-        muted:muted
+        muted:muted,
+        updated_at:Date.now()
       });
+
+      if(presenceStatus && presenceStatus !== "ok"){
+        console.warn("Mikrofon durumu Presence'a gönderilemedi:", presenceStatus);
+      }
     }
 
     renderSidebarVoiceUsers();
-
   }catch(error){
-    toast("Mikrofon hatası: "+error.message);
+    muted = previousMuted;
+    button.innerHTML = muted
+      ? mutedMicIconSvg() + " Mikrofonu aç"
+      : "🎙 Mikrofonu kapat";
+    toast("Mikrofon durumu güncellenemedi: "+error.message);
+    console.error("Mute güncelleme hatası:", error);
+  }finally{
+    muteChanging = false;
+    button.disabled = !livekitRoom;
   }
 }
+
 
 async function leaveVoice(){
   if(leavingVoice) return;
