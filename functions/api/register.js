@@ -1,22 +1,24 @@
 
 const SUPABASE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co";
+const INTERNAL_DOMAIN = "accounts.birartibir.online";
 
-function reply(data, status = 200) {
-  return Response.json(data, {
+const json = (data, status = 200) =>
+  Response.json(data, {
     status,
     headers: { "Cache-Control": "no-store" }
   });
-}
 
-async function verifyTurnstile(token, request, secret) {
-  if (!token || !secret) return false;
+async function captcha(token, request, secret) {
+  if (typeof token !== "string" || !token || !secret) {
+    return false;
+  }
 
   const form = new FormData();
-  form.append("secret", secret);
-  form.append("response", token);
+  form.set("secret", secret);
+  form.set("response", token);
 
   const ip = request.headers.get("CF-Connecting-IP");
-  if (ip) form.append("remoteip", ip);
+  if (ip) form.set("remoteip", ip);
 
   const response = await fetch(
     "https://challenges.cloudflare.com/turnstile/v0/siteverify",
@@ -25,60 +27,59 @@ async function verifyTurnstile(token, request, secret) {
 
   if (!response.ok) return false;
 
-  const result = await response.json();
+  const data = await response.json();
 
-  return result.success === true &&
-    result.hostname === "birartibir.online";
+  return data.success === true &&
+    data.hostname === "birartibir.online";
 }
 
 export async function onRequestPost({ request, env }) {
   try {
-    const origin = new URL(request.url).origin;
-
-    if (request.headers.get("Origin") !== origin) {
-      return reply({ error: "Geçersiz istek." }, 403);
+    if (
+      new URL(request.url).origin !==
+      request.headers.get("Origin")
+    ) {
+      return json({ error: "Geçersiz istek." }, 403);
     }
 
-    if (!env.SUPABASE_SECRET_KEY ||
-        !env.TURNSTILE_SECRET_KEY) {
-      return reply({
-        error: "Sunucu yapılandırması eksik."
-      }, 500);
+    if (
+      !env.SUPABASE_SECRET_KEY ||
+      !env.TURNSTILE_SECRET_KEY
+    ) {
+      return json({ error: "Sunucu ayarları eksik." }, 500);
     }
 
     const body = await request.json().catch(() => null);
 
-    const username = body?.username?.trim();
+    const username =
+      typeof body?.username === "string"
+        ? body.username.trim()
+        : "";
+
     const password = body?.password;
-    const turnstileToken = body?.turnstileToken;
 
     if (
-      typeof username !== "string" ||
       !/^[a-zA-Z0-9_]{3,20}$/.test(username) ||
       typeof password !== "string" ||
       password.length < 6 ||
       password.length > 128
     ) {
-      return reply({
-        error: "Kullanıcı adı 3-20 karakter, şifre 6-128 karakter olmalı."
+      return json({
+        error: "Kullanıcı adı 3–20, şifre 6–128 karakter olmalı."
       }, 400);
     }
 
-    const verified = await verifyTurnstile(
-      turnstileToken,
-      request,
-      env.TURNSTILE_SECRET_KEY
-    );
-
-    if (!verified) {
-      return reply({
+    if (
+      !await captcha(
+        body?.turnstileToken,
+        request,
+        env.TURNSTILE_SECRET_KEY
+      )
+    ) {
+      return json({
         error: "Güvenlik doğrulaması başarısız."
       }, 403);
     }
-
-    const internalEmail =
-      username.toLowerCase() +
-      "@accounts.birartibir.invalid";
 
     const headers = {
       apikey: env.SUPABASE_SECRET_KEY,
@@ -86,13 +87,16 @@ export async function onRequestPost({ request, env }) {
       "Content-Type": "application/json"
     };
 
+    const email =
+      username.toLowerCase() + "@" + INTERNAL_DOMAIN;
+
     const authResponse = await fetch(
       SUPABASE_URL + "/auth/v1/admin/users",
       {
         method: "POST",
         headers,
         body: JSON.stringify({
-          email: internalEmail,
+          email,
           password,
           email_confirm: true,
           app_metadata: {
@@ -102,29 +106,42 @@ export async function onRequestPost({ request, env }) {
       }
     );
 
-    const authData = await authResponse.json().catch(() => ({}));
+    const authData = await authResponse.json()
+      .catch(() => ({}));
 
     if (!authResponse.ok || !authData.id) {
-      return reply({
-        error: "Bu kullanıcı adı kullanılıyor veya kayıt oluşturulamadı."
-      }, 409);
+      console.error(
+        "Auth create failed",
+        authResponse.status,
+        authData?.code || authData?.error_code || ""
+      );
+
+      return json({
+        error: authResponse.status === 422
+          ? "Bu kullanıcı adı kullanılıyor veya adres kabul edilmedi."
+          : "Hesap oluşturulamadı; sunucu ayarları kontrol edilmeli."
+      }, authResponse.status === 422 ? 409 : 502);
     }
 
     const userId = authData.id;
 
-    async function rollback() {
-      const response = await fetch(
-        SUPABASE_URL + "/auth/v1/admin/users/" +
+    const rollback = async () => {
+      const r = await fetch(
+        SUPABASE_URL +
+          "/auth/v1/admin/users/" +
           encodeURIComponent(userId),
-        { method: "DELETE", headers }
+        {
+          method: "DELETE",
+          headers
+        }
       );
 
-      if (!response.ok) {
-        console.error("Account rollback failed:", response.status);
+      if (!r.ok) {
+        console.error("Rollback failed", r.status);
       }
-    }
+    };
 
-    const profileResponse = await fetch(
+    const profile = await fetch(
       SUPABASE_URL + "/rest/v1/registered_accounts",
       {
         method: "POST",
@@ -139,14 +156,20 @@ export async function onRequestPost({ request, env }) {
       }
     );
 
-    if (!profileResponse.ok) {
+    if (!profile.ok) {
+      console.error(
+        "registered_accounts insert failed",
+        profile.status
+      );
+
       await rollback();
-      return reply({
-        error: "Kullanıcı hesabı tamamlanamadı."
+
+      return json({
+        error: "Kayıt tamamlanamadı."
       }, 500);
     }
 
-    const roleResponse = await fetch(
+    const role = await fetch(
       SUPABASE_URL + "/rest/v1/account_roles",
       {
         method: "POST",
@@ -161,22 +184,28 @@ export async function onRequestPost({ request, env }) {
       }
     );
 
-    if (!roleResponse.ok) {
+    if (!role.ok) {
+      console.error(
+        "account_roles insert failed",
+        role.status
+      );
+
       await rollback();
-      return reply({
-        error: "Hesap yetkisi oluşturulamadı."
+
+      return json({
+        error: "Yetki kaydı tamamlanamadı."
       }, 500);
     }
 
-    return reply({
+    return json({
       success: true,
       message: "Hesap oluşturuldu."
     }, 201);
 
   } catch (error) {
-    console.error("Registration error:", error);
+    console.error("Registration error", error);
 
-    return reply({
+    return json({
       error: "Kayıt işlemi başarısız."
     }, 500);
   }
