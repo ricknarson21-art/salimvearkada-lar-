@@ -92,8 +92,9 @@ internal sealed class VoiceOverlay : Form
     private static int RowHeight(OverlaySettings settings) => 24 * settings.TextSize / 100;
     private static int HeaderHeight(OverlaySettings settings) => 34 * settings.TextSize / 100;
 
-    private static Size PanelSize(OverlaySnapshot value, OverlaySettings settings)
+    internal static Size PanelSize(OverlaySnapshot value, OverlaySettings settings)
     {
+        if (settings.Height > 0) return new Size(settings.Width, settings.Height);
         var visible = Math.Min(value.People.Length, settings.Rows);
         var footer = value.Count > visible ? RowHeight(settings) : 0;
         return new Size(settings.Width, HeaderHeight(settings) + visible * RowHeight(settings) + footer + 6);
@@ -104,7 +105,9 @@ internal sealed class VoiceOverlay : Form
         var panel = PanelSize(value, settings);
         var header = HeaderHeight(settings);
         var row = RowHeight(settings);
-        var visible = Math.Min(value.People.Length, settings.Rows);
+        var slots = Math.Max(0, (panel.Height - header - 6) / row);
+        var visible = Math.Min(Math.Min(value.People.Length, settings.Rows), slots);
+        if (value.Count > visible && slots > 1 && visible == slots) visible--;
         var scale = settings.TextSize / 100f;
         if (!settings.Transparent)
         {
@@ -136,7 +139,7 @@ internal sealed class VoiceOverlay : Form
             Draw(g, member.Name, body, 24, y, panel.Width - statusWidth - 39, row, Color.White);
             Draw(g, status, badge, panel.Width - statusWidth - 8, y, statusWidth, row, color);
         }
-        if (value.Count > visible)
+        if (value.Count > visible && slots > visible)
             Draw(g, $"+{value.Count - visible} kişi", body, 24, header + visible * row,
                 panel.Width - 35, row, Color.LightGray);
     }

@@ -51,6 +51,9 @@ internal sealed class DesktopWindow : Form
         var overlayOptions = new ToolStripMenuItem("Gösterge ayarları…");
         overlayOptions.Click += (_, _) => EditOverlaySettings();
         viewMenu.DropDownItems.Add(overlayOptions);
+        var resizeOverlay = new ToolStripMenuItem("Fareyle boyutlandır…");
+        resizeOverlay.Click += (_, _) => ResizeOverlay();
+        viewMenu.DropDownItems.Add(resizeOverlay);
         menu.Items.Add(viewMenu);
         MainMenuStrip = menu;
         Controls.Add(webView);
@@ -182,6 +185,23 @@ internal sealed class DesktopWindow : Form
         using var dialog = new OverlaySettingsDialog(overlayAppearance);
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         overlayAppearance = dialog.Result;
+        SaveOverlayAppearance();
+    }
+
+    private void ResizeOverlay()
+    {
+        using var dialog = new OverlayResizeDialog(overlayAppearance,
+            overlaySnapshot?.Count > 0 ? overlaySnapshot : OverlaySettingsDialog.PreviewRoom);
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        overlayAppearance.Width = dialog.PanelSize.Width;
+        overlayAppearance.Height = dialog.PanelSize.Height;
+        overlayAppearance.Rows = 12;
+        overlayAppearance.Clamp();
+        SaveOverlayAppearance();
+    }
+
+    private void SaveOverlayAppearance()
+    {
         overlay.SetAppearance(overlayAppearance);
         overlaySetting.Checked = overlayAppearance.Enabled;
         if (!overlayAppearance.Save())
@@ -217,7 +237,7 @@ internal sealed class DesktopWindow : Form
         overlayLastUpdate = now;
         var foreground = GetForegroundWindow();
         if (!overlaySetting.Checked || overlaySnapshot == null || overlaySnapshot.Count == 0 ||
-            foreground == IntPtr.Zero || foreground == Handle || !GetWindowRect(foreground, out var bounds))
+            foreground == IntPtr.Zero || foreground == Handle || !Enabled || !GetWindowRect(foreground, out var bounds))
         {
             overlay.Hide();
             return;

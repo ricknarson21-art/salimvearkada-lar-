@@ -10,7 +10,10 @@ public sealed class OverlaySettings
 {
     public bool Enabled { get; set; } = true;
     public bool Transparent { get; set; }
+    internal const int MinWidth = 190, MaxWidth = 600;
+    internal const int MinHeight = 90, MaxHeight = 520;
     public int Width { get; set; } = 250;
+    public int Height { get; set; }
     public int TextSize { get; set; } = 100;
     public int Rows { get; set; } = 12;
     public int OffsetX { get; set; } = 12;
@@ -18,7 +21,8 @@ public sealed class OverlaySettings
 
     internal void Clamp()
     {
-        Width = Limit(Width, 190, 440);
+        Width = Limit(Width, MinWidth, MaxWidth);
+        if (Height != 0) Height = Limit(Height, MinHeight, MaxHeight);
         TextSize = Limit(TextSize, 80, 150);
         Rows = Limit(Rows, 3, 12);
         OffsetX = Limit(OffsetX, 0, 250);
@@ -69,13 +73,12 @@ internal sealed class OverlaySettingsDialog : Form
 {
     private readonly CheckBox enabled = new() { Text = "Oyun göstergesi açık", AutoSize = true };
     private readonly CheckBox transparent = new() { Text = "Saydam arka plan", AutoSize = true };
-    private readonly NumericUpDown width = Range(190, 440, 10);
+    private int panelWidth, panelHeight, panelRows;
     private readonly NumericUpDown textSize = Range(80, 150, 5);
-    private readonly NumericUpDown rows = Range(3, 12, 1);
     private readonly NumericUpDown offsetX = Range(0, 250, 5);
     private readonly NumericUpDown offsetY = Range(0, 250, 5);
     private readonly Panel preview = new() { Dock = DockStyle.Fill, BackColor = Color.FromArgb(66, 84, 109) };
-    private static readonly OverlaySnapshot PreviewRoom = new()
+    internal static readonly OverlaySnapshot PreviewRoom = new()
     {
         Room = "Genel",
         Count = 4,
@@ -90,8 +93,8 @@ internal sealed class OverlaySettingsDialog : Form
 
     internal OverlaySettings Result => new()
     {
-        Enabled = enabled.Checked, Transparent = transparent.Checked, Width = (int)width.Value,
-        TextSize = (int)textSize.Value, Rows = (int)rows.Value,
+        Enabled = enabled.Checked, Transparent = transparent.Checked, Width = panelWidth, Height = panelHeight,
+        TextSize = (int)textSize.Value, Rows = panelRows,
         OffsetX = (int)offsetX.Value, OffsetY = (int)offsetY.Value
     };
 
@@ -115,9 +118,19 @@ internal sealed class OverlaySettingsDialog : Form
         controls.Controls.Add(transparent, 0, 1);
         controls.SetColumnSpan(transparent, 2);
 
-        AddControl("Genişlik (px)", width, 2);
+        var resize = new Button { Text = "Fareyle boyutlandır…", AutoSize = true };
+        controls.Controls.Add(resize, 0, 2);
+        controls.SetColumnSpan(resize, 2);
+        resize.Click += (_, _) =>
+        {
+            using var editor = new OverlayResizeDialog(Result, PreviewRoom);
+            if (editor.ShowDialog(this) != DialogResult.OK) return;
+            panelWidth = editor.PanelSize.Width;
+            panelHeight = editor.PanelSize.Height;
+            panelRows = 12;
+            preview.Invalidate();
+        };
         AddControl("Yazı boyutu (%)", textSize, 3);
-        AddControl("En çok kişi", rows, 4);
         AddControl("Soldan boşluk (px)", offsetX, 5);
         AddControl("Üstten boşluk (px)", offsetY, 6);
 
@@ -133,7 +146,7 @@ internal sealed class OverlaySettingsDialog : Form
         reset.Click += (_, _) => SetControls(new OverlaySettings());
         enabled.CheckedChanged += (_, _) => preview.Invalidate();
         transparent.CheckedChanged += (_, _) => preview.Invalidate();
-        foreach (var input in new[] { width, textSize, rows, offsetX, offsetY })
+        foreach (var input in new[] { textSize, offsetX, offsetY })
             input.ValueChanged += (_, _) => preview.Invalidate();
 
         preview.Paint += (_, args) =>
@@ -161,9 +174,10 @@ internal sealed class OverlaySettingsDialog : Form
     {
         enabled.Checked = value.Enabled;
         transparent.Checked = value.Transparent;
-        width.Value = value.Width;
+        panelWidth = value.Width;
+        panelHeight = value.Height;
+        panelRows = value.Rows;
         textSize.Value = value.TextSize;
-        rows.Value = value.Rows;
         offsetX.Value = value.OffsetX;
         offsetY.Value = value.OffsetY;
     }
@@ -172,4 +186,50 @@ internal sealed class OverlaySettingsDialog : Form
     {
         Minimum = minimum, Maximum = maximum, Increment = increment, Width = 62
     };
+}
+
+
+internal sealed class OverlayResizeDialog : Form
+{
+    private readonly Panel panel = new() { Dock = DockStyle.Fill, BackColor = Color.FromArgb(66, 84, 109) };
+    internal Size PanelSize => panel.ClientSize;
+
+    internal OverlayResizeDialog(OverlaySettings current, OverlaySnapshot snapshot)
+    {
+        Text = "Gösterge · Kenardan veya köşeden sürükle";
+        StartPosition = FormStartPosition.CenterParent;
+        FormBorderStyle = FormBorderStyle.Sizable;
+        MinimizeBox = MaximizeBox = false;
+        ShowInTaskbar = false;
+
+        const int footerHeight = 38;
+        var footer = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Bottom, Height = footerHeight, FlowDirection = FlowDirection.RightToLeft,
+            Padding = new Padding(3), WrapContents = false
+        };
+        var save = new Button { Text = "Boyutu kaydet", AutoSize = true, DialogResult = DialogResult.OK };
+        var cancel = new Button { Text = "İptal", AutoSize = true, DialogResult = DialogResult.Cancel };
+        footer.Controls.Add(save);
+        footer.Controls.Add(cancel);
+        Controls.Add(panel);
+        Controls.Add(footer);
+        AcceptButton = save;
+        CancelButton = cancel;
+
+        MinimumSize = SizeFromClientSize(new Size(OverlaySettings.MinWidth, OverlaySettings.MinHeight + footerHeight));
+        MaximumSize = SizeFromClientSize(new Size(OverlaySettings.MaxWidth, OverlaySettings.MaxHeight + footerHeight));
+        var startingSize = VoiceOverlay.PanelSize(snapshot, current);
+        ClientSize = new Size(startingSize.Width, Math.Max(OverlaySettings.MinHeight, startingSize.Height) + footerHeight);
+        panel.Resize += (_, _) => panel.Invalidate();
+        panel.Paint += (_, args) =>
+        {
+            var appearance = new OverlaySettings
+            {
+                Width = panel.Width, Height = panel.Height, Rows = 12,
+                TextSize = current.TextSize, Transparent = current.Transparent
+            };
+            VoiceOverlay.PaintSnapshot(args.Graphics, snapshot, appearance);
+        };
+    }
 }

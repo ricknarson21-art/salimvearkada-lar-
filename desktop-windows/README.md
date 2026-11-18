@@ -6,7 +6,7 @@ Windows tarafında harfler, rakamlar, F1–F24 ve yaygın gezinme tuşları dest
 
 ## Oyun göstergesi
 
-Bir ses odasına bağlıyken başka bir pencereye geçince gösterge aktif pencerenin sol üstünde görünür. Odadaki kişileri, konuşanları ve mikrofonu kapalı olanları gösterir. **Ctrl+Shift+F10** veya **Görünüm → Oyun göstergesi** ile açıp kapatabilirsin. **Görünüm → Gösterge ayarları** bölümünde genişliği, yazı boyutunu, en çok kaç kişinin görüneceğini, soldan ve üstten boşluğu ve saydam arka planı ayarlayabilirsin. Ayarlar Windows kullanıcısına göre kaydedilir. Oyun için pencereli veya kenarlıksız tam ekran kullan.
+Bir ses odasına bağlıyken başka bir pencereye geçince gösterge aktif pencerenin sol üstünde görünür. Odadaki kişileri, konuşanları ve mikrofonu kapalı olanları gösterir. **Ctrl+Shift+F10** veya **Görünüm → Oyun göstergesi** ile açıp kapatabilirsin. **Görünüm → Gösterge ayarları** bölümünde yazı boyutunu, soldan ve üstten boşluğu ve saydam arka planı ayarlayabilirsin. **Görünüm → Fareyle boyutlandır** ile pencerenin kenarını veya köşesini sürükle ve **Boyutu kaydet** düğmesine bas. Ayarlar Windows kullanıcısına göre kaydedilir. Oyun için pencereli veya kenarlıksız tam ekran kullan.
 
 ## Derleme
 
