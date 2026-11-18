@@ -19,11 +19,11 @@
     .sidebar{width:250px;flex:0 0 250px;background:var(--side);padding:22px 18px;border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:100vh}
     .brand h1{font-size:22px;margin:0 0 18px;color:#fff;overflow-wrap:anywhere}
     .server-label{margin:0 0 12px;color:#c5d3e6}
-    .room-link{padding:13px;background:var(--panel2);border-radius:9px;margin:5px 0 12px}
+    .room-link{padding:10px 12px;background:var(--panel2);border-radius:9px;margin:5px 0 7px;cursor:pointer;border:1px solid transparent;color:#dce8f8}.room-link.active{border-color:#6598ee;background:#203b61}.room-list{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}.room-link:hover{filter:brightness(1.15)}
     hr{border:0;border-top:1px solid #d6deeb;margin:0 0 17px}
     .side-heading{font-size:15px;margin:0 0 10px}
     #sidebar-voice-users{display:flex;flex-direction:column;gap:8px}
-    .sidebar-person{display:flex;align-items:center;gap:9px;padding:10px;background:var(--panel2);border-radius:9px;overflow-wrap:anywhere}
+    .sidebar-person{display:flex;align-items:center;gap:9px;padding:10px;background:var(--panel2);border-radius:9px;overflow-wrap:anywhere}.sidebar-person.speaking,.online-person.speaking{outline:2px solid var(--green);box-shadow:0 0 14px #34d39966}.room-hint{font-size:12px;color:var(--muted);margin:0 0 8px}
     .avatar{width:34px;height:34px;flex:0 0 34px;border-radius:50%;background:#3566b5;display:grid;place-items:center;font-weight:bold;color:#fff}
     .sidebar-person .avatar{width:28px;height:28px;flex-basis:28px;font-size:12px}
     .empty{color:var(--muted);font-size:13px;padding:8px 2px}
@@ -73,9 +73,14 @@
     <aside class="sidebar">
       <div class="brand"><h1>🎧 salimvearkadaşları</h1></div>
       <p class="server-label">ÖZEL SUNUCUMUZ</p>
-      <div class="room-link">🎙️　Sesli oda</div>
+      <div class="side-heading">Sesli odalar</div>
+      <div class="room-list" id="room-list">
+        <button class="room-link active" data-room="genel">🎙️ Genel</button>
+        <button class="room-link" data-room="oyun">🎮 Oyun</button>
+        <button class="room-link" data-room="muhabbet">☕ Muhabbet</button>
+      </div>
       <hr>
-      <h3 class="side-heading">Odadaki kişiler <span id="voice-count" style="color:#9aabc2;font-weight:normal">(0)</span></h3>
+      <h3 class="side-heading"> <span id="selected-room-label">Genel</span> — Odadakiler <span id="voice-count" style="color:#9aabc2;font-weight:normal">(0)</span></h3>
       <div id="sidebar-voice-users"><div class="empty">Henüz kimse katılmadı.</div></div>
       <div class="side-bottom">
         <div class="me"><div class="avatar" id="my-avatar">?</div><div class="me-info"><strong id="my-name">Misafir</strong><small>Misafir hesabı</small></div><button class="muted-btn" id="logout-btn" title="Çıkış yap">↪</button></div>
@@ -84,7 +89,8 @@
     <main class="main">
       <div class="top"><h1>Arkadaş odası</h1><span class="status-pill" id="connection-state">Bağlanıyor…</span></div>
       <section class="card">
-        <h2>🔊 Sesli sohbet</h2>
+        <h2 id="voice-heading">🔊 Genel ses odası</h2>
+        <p class="room-hint">Bir ses odası seç; yalnızca o odadaki kişiler burada görünür.</p>
         <p class="online-title">🟢 Çevrimiçi arkadaşlar</p>
         <div id="online-users" class="online-grid"><div class="empty">Giriş yapanlar burada görünür.</div></div>
         <div class="voice-controls">
@@ -130,6 +136,8 @@ let chatChannel = null;
 let livekitRoom = null;
 let muted = false;
 let leavingVoice = false;
+let selectedRoom = "genel";
+let activeSpeakerIds = new Set();
 
 const $ = id => document.getElementById(id);
 function initials(name){return (name || "?").trim().slice(0,1).toLocaleUpperCase("tr-TR");}
@@ -175,15 +183,41 @@ function renderOnlineUsers(){
   }
 }
 
-// Ses odası listesi sadece Presence üzerinden beslenir. DB'de kalıcı voice_members kaydı tutulmaz.
-async function subscribeVoicePresence(){
+// Her ses odasının kendi Supabase Presence kanalı vardır.
+async function subscribeVoicePresence(roomName=selectedRoom){
   if(!currentUser) return;
   if(voicePresenceChannel) await db.removeChannel(voicePresenceChannel);
-  voicePresenceChannel=db.channel("voice-room-live",{config:{presence:{key:currentUser.id}}});
+  voicePresenceChannel=db.channel("voice-room-"+roomName,{config:{presence:{key:currentUser.id}}});
   voicePresenceChannel.on("presence",{event:"sync"},renderSidebarVoiceUsers);
   await subscribeAndWait(voicePresenceChannel,"Ses odası listesi");
   renderSidebarVoiceUsers();
 }
+function renderSidebarVoiceUsers(){
+  const box=$("sidebar-voice-users"); if(!box) return;
+  box.replaceChildren();
+  const people=uniquePresencePeople(voicePresenceChannel);
+  setText("voice-count","("+people.length+")");
+  if(!people.length){box.innerHTML='<div class="empty">Bu odada henüz kimse yok.</div>';return;}
+  people.sort((a,b)=>(a.username||"").localeCompare(b.username||"","tr"));
+  for(const person of people){
+    const row=document.createElement("div"); row.className="sidebar-person"+(activeSpeakerIds.has(person.user_id)?" speaking":"");
+    const avatar=document.createElement("div"); avatar.className="avatar"; avatar.textContent=initials(person.username);
+    const name=document.createElement("strong"); name.textContent=person.username||"Misafir";
+    row.append(avatar,name); box.append(row);
+  }
+}
+async function selectRoom(roomName){
+  if(!["genel","oyun","muhabbet"].includes(roomName)) return;
+  if(livekitRoom){toast("Önce bulunduğun ses odasından ayrılmalısın.");return;}
+  selectedRoom=roomName;
+  const labels={genel:"Genel",oyun:"Oyun",muhabbet:"Muhabbet"};
+  setText("selected-room-label",labels[roomName]);
+  setText("voice-heading","🔊 "+labels[roomName]+" ses odası");
+  document.querySelectorAll("[data-room]").forEach(button=>button.classList.toggle("active",button.dataset.room===roomName));
+  await subscribeVoicePresence(roomName);
+  setText("voice-status",labels[roomName]+" odası seçildi. Katılmaya hazırsın.");
+}
+
 async function subscribeAndWait(channel,label){
   await new Promise((resolve,reject)=>{
     const timeout=setTimeout(()=>reject(new Error(label+" bağlantısı zaman aşımına uğradı.")),12000);
@@ -268,7 +302,8 @@ async function joinVoice(){
     if(!session?.access_token) throw new Error("Oturum bulunamadı.");
     const response=await fetch("/api/livekit-token",{
       method:"POST",
-      headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token}
+      headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
+      body:JSON.stringify({roomName:selectedRoom})
     });
     const result=await response.json();
     if(!response.ok) throw new Error(result.error||"Ses bağlantısı kurulamadı.");
@@ -285,18 +320,22 @@ async function joinVoice(){
     livekitRoom.on(LivekitClient.RoomEvent.Disconnected,()=>{
       if(!leavingVoice) resetVoiceUi("Ses bağlantısı kesildi.");
     });
+    livekitRoom.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,speakers=>{
+      activeSpeakerIds=new Set(speakers.map(participant=>participant.identity));
+      renderSidebarVoiceUsers();
+    });
 
     await livekitRoom.connect(result.serverUrl,result.token);
     await livekitRoom.localParticipant.setMicrophoneEnabled(true);
     muted=false;
     if(voicePresenceChannel){
-      const presenceStatus=await voicePresenceChannel.track({user_id:currentUser.id,username:currentUsername});
+      const presenceStatus=await voicePresenceChannel.track({user_id:currentUser.id,username:currentUsername,room_name:selectedRoom});
       if(presenceStatus && presenceStatus!=="ok") console.warn("Ses odası Presence track sonucu:",presenceStatus);
     }
     $("mute-btn").disabled=false;
     $("leave-btn").disabled=false;
     $("mute-btn").textContent="🎙 Mikrofonu kapat";
-    setText("voice-status","Sesli odaya katıldın!");
+    setText("voice-status",({genel:"Genel",oyun:"Oyun",muhabbet:"Muhabbet"}[selectedRoom])+" odasına katıldın!");
     renderSidebarVoiceUsers();
     toast("Sesli odaya katıldın!");
   }catch(error){
@@ -317,11 +356,12 @@ async function toggleMute(){
   }catch(error){muted=!muted;toast("Mikrofon hatası: "+error.message);}
 }
 function resetVoiceUi(message){
-  livekitRoom=null; muted=false; leavingVoice=false;
+  livekitRoom=null; muted=false; leavingVoice=false; activeSpeakerIds.clear();
   $("join-btn").disabled=false; $("mute-btn").disabled=true; $("leave-btn").disabled=true;
   $("mute-btn").textContent="🎙 Mikrofon kapalı";
   setText("voice-status",message);
   if(voicePresenceChannel) voicePresenceChannel.untrack().catch(console.error);
+  renderSidebarVoiceUsers();
 }
 async function leaveVoice(){
   if(leavingVoice) return;
@@ -332,6 +372,7 @@ async function leaveVoice(){
       await room.disconnect();
     }
     if(voicePresenceChannel) await voicePresenceChannel.untrack();
+    activeSpeakerIds.clear();
     muted=false;
     $("join-btn").disabled=false; $("mute-btn").disabled=true; $("leave-btn").disabled=true;
     $("mute-btn").textContent="🎙 Mikrofon kapalı";
@@ -401,6 +442,7 @@ $("join-btn").addEventListener("click",joinVoice);
 $("mute-btn").addEventListener("click",toggleMute);
 $("leave-btn").addEventListener("click",leaveVoice);
 $("logout-btn").addEventListener("click",logout);
+document.querySelectorAll("[data-room]").forEach(button=>button.addEventListener("click",()=>selectRoom(button.dataset.room)));
 
 // Sekme kapanırken Presence bağlantısı kesilir; Supabase Presence de bağlantı kaybını temizler.
 window.addEventListener("pagehide",()=>{
