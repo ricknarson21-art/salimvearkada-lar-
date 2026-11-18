@@ -262,3 +262,6 @@ async function handler(request, env, isPost) {
 }
 export const onRequestGet = ({request,env})=>handler(request,env,false);
 export const onRequestPost = ({request,env})=>handler(request,env,true);
+
+// Müzik komutları da aynı LiveKit oda yetkisini kullanır.
+export { roomCall };

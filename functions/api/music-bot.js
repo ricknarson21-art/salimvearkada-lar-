@@ -1,8 +1,31 @@
 import { ALLOWED_ROOMS, authenticateVoiceUser } from "./_voice-auth.js";
+import { roomCall } from "./moderation.js";
 
+const STATE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co/rest/v1/room_music_session";
+const FIELDS = "room,video_id,started_at";
 const reply = (body, status = 200) => Response.json(body, {
   status, headers: { "Cache-Control": "no-store" }
 });
+
+async function stateRequest(env, method, filters, body) {
+  const response = await fetch(STATE_URL + filters, {
+    method,
+    headers: {
+      apikey: env.SUPABASE_SECRET_KEY.trim(),
+      "Content-Type": "application/json",
+      ...(method === "POST" ? { Prefer: "resolution=merge-duplicates,return=representation" } : {})
+    },
+    ...(body ? { body: JSON.stringify(body) } : {})
+  });
+  if (!response.ok) throw new Error("Music state request failed (" + response.status + ")");
+  if (response.status === 204) return null;
+  return (await response.json())[0] ?? null;
+}
+
+async function inVoiceRoom(env, room, identity) {
+  const result = await roomCall(env, "ListParticipants", room, { room });
+  return result.participants?.some(participant => participant.identity === identity) ?? false;
+}
 
 export async function onRequestPost({ request, env }) {
   try {
@@ -10,43 +33,41 @@ export async function onRequestPost({ request, env }) {
     if (user instanceof Response) return user;
 
     const body = await request.json().catch(() => null);
-    if (!ALLOWED_ROOMS.has(body?.roomName) || !["play", "stop"].includes(body?.action)) {
+    const room = body?.roomName;
+    const action = body?.action;
+    if (!ALLOWED_ROOMS.has(room) || !["state", "play", "stop"].includes(action)) {
       return reply({ error: "Geçersiz müzik komutu veya ses odası." }, 400);
     }
 
-    let videoId;
-    if (body.action === "play") {
-      videoId = youtubeVideoId(body.url);
-      if (!videoId) return reply({ error: "Geçerli bir YouTube video bağlantısı gir." }, 400);
+    if (action === "state") {
+      const session = await stateRequest(env, "GET", `?slot=eq.1&room=eq.${room}&select=${FIELDS}`);
+      if (session && !await inVoiceRoom(env, room, user.id)) {
+        return reply({ error: "Önce bu ses odasına katıl." }, 403);
+      }
+      return reply({ session, now: Date.now() });
     }
 
-    if (!env.MUSIC_BOT_URL || !env.MUSIC_BOT_SECRET) {
-      return reply({ error: "Müzik botu sunucusu henüz yapılandırılmamış." }, 503);
+    const videoId = action === "play" ? youtubeVideoId(body.url) : null;
+    if (action === "play" && !videoId) {
+      return reply({ error: "Geçerli bir YouTube video bağlantısı gir." }, 400);
     }
-    const service = new URL("/command", env.MUSIC_BOT_URL);
-    if (service.protocol !== "https:") throw new Error("Music bot requires HTTPS");
 
-    const upstream = await fetch(service, {
-      method: "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + env.MUSIC_BOT_SECRET
-      },
-      body: JSON.stringify({ action: body.action, room: body.roomName, userId: user.id, videoId })
+    if (!await inVoiceRoom(env, room, user.id)) {
+      return reply({ error: "Önce bu ses odasına katıl." }, 403);
+    }
+
+    if (action === "stop") {
+      await stateRequest(env, "DELETE", `?slot=eq.1&room=eq.${room}`);
+      return reply({ session: null, now: Date.now() });
+    }
+
+    const session = await stateRequest(env, "POST", `?on_conflict=slot&select=${FIELDS}`, {
+      slot: 1, room, video_id: videoId, started_at: new Date().toISOString()
     });
-    if (upstream.ok) return reply({ ok: true });
-    const errors = {
-      403: "Önce bu ses odasına katıl.",
-      409: "Bot başka bir komutu işliyor veya bu odada çalmıyor.",
-      422: "Bu YouTube videosu oynatılamadı. Başka bir bağlantı dene."
-    };
-    if (errors[upstream.status]) return reply({ error: errors[upstream.status] }, upstream.status);
-    throw new Error("Music bot request failed (" + upstream.status + ")");
+    return reply({ session, now: Date.now() });
   } catch (error) {
-    console.error("Music bot:", error.message);
-    return reply({ error: "Müzik botuna şu anda ulaşılamıyor." }, 502);
+    console.error("Music session:", error.message);
+    return reply({ error: "Müzik oturumuna şu anda ulaşılamıyor." }, 502);
   }
 }
 
