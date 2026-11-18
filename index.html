@@ -35,6 +35,18 @@
     .voice-volume input[type="range"]{min-width:0;width:100%;flex:1;accent-color:#60a5fa;cursor:pointer;margin:0}
     .voice-volume-value{color:var(--muted);font-size:11px;min-width:31px;text-align:right;font-variant-numeric:tabular-nums}
     .mic-status svg{display:block}
+    .mod-person-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:3px}
+    .mod-person-actions button{font-size:11px;padding:5px 7px;border-radius:6px;background:#34445f}
+    .mod-person-actions button.kick{background:#862e41}
+    .mod-person-actions select{font-size:11px;min-width:0;padding:4px;border:1px solid #456080;border-radius:6px;background:#192a40;color:#fff}
+    .mod-person-actions button:disabled{opacity:.45}
+    .owner-panel{margin:10px 0 5px;padding:10px;background:#182942;border:1px solid #2c4565;border-radius:10px;max-height:240px;overflow-y:auto}
+    .owner-panel h4{font-size:13px;margin:0 0 8px}
+    .admin-account{display:flex;align-items:center;justify-content:space-between;gap:5px;font-size:12px;padding:5px 0;border-bottom:1px solid #29405e;overflow-wrap:anywhere}
+    .admin-account button{padding:5px 7px;font-size:11px}
+    .chat-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+    .chat-title-row h2{margin:0}
+    #clear-chat-btn{display:none;background:#862e41;padding:7px 10px;font-size:12px}
     .empty{color:var(--muted);font-size:13px;padding:8px 2px}
     .side-bottom{margin-top:auto;padding-top:18px}
     .me{display:flex;align-items:center;gap:9px;min-width:0}
@@ -99,6 +111,10 @@
       <hr>
       <h3 class="side-heading"> <span id="selected-room-label">Genel</span> — Odadakiler <span id="voice-count" style="color:#9aabc2;font-weight:normal">(0)</span></h3>
       <div id="sidebar-voice-users"><div class="empty">Henüz kimse katılmadı.</div></div>
+      <section id="owner-admin-panel" class="owner-panel" hidden>
+        <h4>👑 Admin yönetimi</h4>
+        <div id="owner-admin-list"></div>
+      </section>
       <div class="side-bottom">
         <div class="me"><div class="avatar" id="my-avatar">?</div><div class="me-info"><strong id="my-name">Misafir</strong><small>Misafir hesabı</small></div><button class="muted-btn" id="logout-btn" title="Çıkış yap">↪</button></div>
       </div>
@@ -118,7 +134,7 @@
         <p id="voice-status" class="statusline">Henüz sesli odaya katılmadın.</p>
       </section>
       <section class="card">
-        <h2>💬 Genel sohbet</h2>
+        <div class="chat-title-row"><h2>💬 Genel sohbet</h2><button type="button" id="clear-chat-btn">🧹 Sohbeti temizle</button></div>
         <div id="messages"><div class="empty">Mesajlar yükleniyor…</div></div>
         <div class="chatrow"><input id="msg" maxlength="2000" placeholder="Mesajını yaz…" autocomplete="off"><button id="send-btn">Gönder</button></div>
       </section>
@@ -167,6 +183,9 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let currentUser = null;
 let currentUsername = null;
 let accountType = "guest";
+let moderationRole = "member";
+let moderationAccounts = [];
+const MOD_ROOMS = {genel:"Genel",oyun:"Oyun",muhabbet:"Muhabbet"};
 let authMode = "guest";
 let turnstileWidgetId = null;
 const TURNSTILE_SITE_KEY = "0x4AAAAAAGGKEwfNQTK39Muf";
@@ -493,8 +512,125 @@ function renderSidebarVoiceUsers(){
     if((isSelf || !livekitRoom) && row.querySelector(".voice-volume")){
       row.querySelector(".voice-volume").remove();
     }
+    ensureModeratorActions(row,person);
     if(box.children[index]!==row)box.insertBefore(row,box.children[index]||null);
   });
+}
+
+// ADMIN / KURUCU - Sunucu her isteği Supabase Auth + account_roles ile yeniden doğrular.
+async function moderationRequest(payload){
+  const {data:{session},error} = await db.auth.getSession();
+  if(error || !session?.access_token) throw new Error("Önce giriş yapmalısın");
+  const method=payload ? "POST" : "GET";
+  const response=await fetch("/api/moderation",{
+    method, headers:{Authorization:"Bearer "+session.access_token,
+      ...(payload?{"Content-Type":"application/json"}:{})},
+    ...(payload?{body:JSON.stringify(payload)}:{})
+  });
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok) throw new Error(result.error||"Yetki işlemi başarısız ("+response.status+")");
+  return result;
+}
+async function refreshModerationStatus(){
+  try{
+    const result=await moderationRequest();
+    moderationRole=result.role||"member";
+    moderationAccounts=Array.isArray(result.accounts)?result.accounts:[];
+    renderOwnerPanel();
+    renderSidebarVoiceUsers();
+  }catch(error){
+    moderationRole="member";moderationAccounts=[];
+    renderOwnerPanel();renderSidebarVoiceUsers();
+    console.warn("Yetki bilgileri yüklenemedi:",error);
+  }
+}
+function roleName(role){return role==="owner"?"Kurucu":role==="admin"?"Admin":"Üye";}
+function renderOwnerPanel(){
+  const panel=$("owner-admin-panel");
+  panel.hidden=moderationRole!=="owner";
+  $("clear-chat-btn").style.display=moderationRole==="owner"||moderationRole==="admin"?"inline-block":"none";
+  const label=document.querySelector(".me-info small");
+  if(label) label.textContent=(accountType==="registered"?"Kayıtlı hesap":"Misafir hesabı")+
+    (moderationRole==="owner"?" • 👑 Kurucu":moderationRole==="admin"?" • 🛡️ Admin":"");
+  const box=$("owner-admin-list");box.replaceChildren();
+  if(moderationRole!=="owner") return;
+  for(const account of moderationAccounts){
+    const row=document.createElement("div");row.className="admin-account";
+    const name=document.createElement("span");
+    name.textContent=account.username+" ("+roleName(account.role)+")";
+    row.append(name);
+    if(account.role!=="owner" && account.user_id!==currentUser?.id){
+      const btn=document.createElement("button");
+      btn.textContent=account.role==="admin"?"Adminliği al":"Admin yap";
+      btn.title="Yetki değiştir";
+      btn.addEventListener("click",async()=>{
+        const nextRole=account.role==="admin"?"member":"admin";
+        if(!confirm(account.username+" için "+(nextRole==="admin"?"admin yetkisi verilsin mi?":"admin yetkisi kaldırılsın mı?")))return;
+        btn.disabled=true;
+        try{
+          const result=await moderationRequest({action:"set_role",targetUserId:account.user_id,newRole:nextRole});
+          toast(result.message||"Yetki değiştirildi");
+          await refreshModerationStatus();
+        }catch(error){toast(error.message);btn.disabled=false;}
+      });
+      row.append(btn);
+    }
+    box.append(row);
+  }
+  if(!moderationAccounts.length){box.textContent="Henüz kayıtlı üye bulunamadı.";}
+}
+async function actOnVoice(targetId, targetName, action, destinationRoom, button){
+  if(!targetId || !["owner","admin"].includes(moderationRole)) return;
+  const messages={kick:"odadan çıkarılsın mı?",mute:"mikrofonu susturulsun mu?",move:MOD_ROOMS[destinationRoom]+" odasına taşınsın mı?"};
+  if(!confirm(targetName+" "+messages[action]))return;
+  button.disabled=true;
+  try{
+    const result=await moderationRequest({action,room:selectedRoom,targetUserId:targetId,
+      ...(action==="move"?{destinationRoom}:{})});
+    toast(result.message||"İşlem tamamlandı");
+  }catch(error){toast(error.message);}
+  finally{button.disabled=false;}
+}
+function ensureModeratorActions(row,person){
+  const existing=row.querySelector(".mod-person-actions");
+  const targetRole=moderationAccounts.find(a=>a.user_id===person.user_id)?.role||"member";
+  const allowed=(moderationRole==="owner"&&targetRole!=="owner" ||
+    moderationRole==="admin"&&targetRole==="member") && person.user_id!==currentUser?.id;
+  if(!allowed){if(existing)existing.remove();return;}
+  if(existing) return;
+  const body=row.querySelector(".voice-person-body");
+  if(!body) return;
+  const controls=document.createElement("div");controls.className="mod-person-actions";
+  const muteButton=document.createElement("button");muteButton.type="button";muteButton.textContent="🎤 Sustur";
+  muteButton.addEventListener("click",()=>actOnVoice(person.user_id,person.username,"mute",null,muteButton));
+  const kickButton=document.createElement("button");kickButton.type="button";kickButton.className="kick";kickButton.textContent="🚪 At";
+  kickButton.addEventListener("click",()=>actOnVoice(person.user_id,person.username,"kick",null,kickButton));
+  const select=document.createElement("select");select.setAttribute("aria-label","Taşınacak oda");
+  for(const [key,label] of Object.entries(MOD_ROOMS)){
+    const option=document.createElement("option");option.value=key;option.textContent=label;
+    select.append(option);
+  }
+  select.value=Object.keys(MOD_ROOMS).find(key=>key!==selectedRoom)||"genel";
+  const moveButton=document.createElement("button");moveButton.type="button";moveButton.textContent="➡ Taşı";
+  moveButton.addEventListener("click",()=>{
+    if(select.value===selectedRoom){toast("Farklı bir oda seç");return;}
+    void actOnVoice(person.user_id,person.username,"move",select.value,moveButton);
+  });
+  controls.append(muteButton,kickButton,select,moveButton);
+  body.append(controls);
+}
+async function clearChatAsModerator(){
+  if(!confirm("TÜM sohbet geçmişi kalıcı olarak silinsin mi? Bu işlem geri alınamaz."))return;
+  const button=$("clear-chat-btn");button.disabled=true;
+  try{
+    const result=await moderationRequest({action:"clear_chat"});
+    await loadMessages();
+    if(chatChannel){
+      void chatChannel.send({type:"broadcast",event:"chat-cleared",payload:{}}).catch(console.warn);
+    }
+    toast(result.message||"Sohbet temizlendi");
+  }catch(error){toast(error.message);}
+  finally{button.disabled=false;}
 }
 
 // Misafir, kayıtlı giriş ve kayıt aynı ana sayfada bulunur.
@@ -551,6 +687,7 @@ async function startAuthenticatedApp(user,name,type){
   await subscribeVoicePresence();
   await loadMessages();
   await subscribeMessages();
+  void refreshModerationStatus();
 }
 async function login(){
   const name=$("guest-name").value.trim();
@@ -729,6 +866,37 @@ async function joinVoice(){
     if(!response.ok) throw new Error(result.error||"Ses bağlantısı kurulamadı.");
     room=new LivekitClient.Room();
     const activeRoom=room;
+    // LiveKit Cloud taşıma sırasında bağlantıyı kendisi yeni odaya geçirir.
+    if(LivekitClient.RoomEvent.Moved){
+      room.on(LivekitClient.RoomEvent.Moved,async newRoom=>{
+        if(activeRoom!==livekitRoom || !MOD_ROOMS[newRoom]) return;
+        void publishVoiceState(false); // Eski odadan ayrıldığını bildir.
+        selectedRoom=newRoom;
+        activeSpeakerIds.clear();
+        setText("selected-room-label",MOD_ROOMS[newRoom]);
+        setText("voice-heading","🔊 "+MOD_ROOMS[newRoom]+" ses odası");
+        document.querySelectorAll("[data-room]").forEach(button=>button.classList.toggle("active",button.dataset.room===newRoom));
+        try{
+          await subscribeVoicePresence(newRoom);
+          void publishVoiceState(true);
+          renderSidebarVoiceUsers();
+          setText("voice-status",MOD_ROOMS[newRoom]+" odasına yetkili tarafından taşındın.");
+          toast("Başka odaya taşındın: "+MOD_ROOMS[newRoom]);
+        }catch(error){console.error("Taşınan oda güncellenemedi:",error);toast("Oda listesi yenilenemedi");}
+      });
+    }
+    // Yetkili sunucudan mikrofonu susturduğunda kendi butonu ve simgesi de güncellenir.
+    if(LivekitClient.RoomEvent.TrackMuted){
+      room.on(LivekitClient.RoomEvent.TrackMuted,(publication,participant)=>{
+        const source=String(publication?.source||"").toLowerCase();
+        const own=participant?.identity===currentUser?.id || participant===room.localParticipant;
+        if(own && source.includes("microphone") && !muteChanging && activeRoom===livekitRoom){
+          muted=true;renderVoiceButtons();renderSidebarVoiceUsers();
+          void publishVoiceState(true);
+          toast("Mikrofonun yetkili tarafından susturuldu.");
+        }
+      });
+    }
     room.on(LivekitClient.RoomEvent.TrackSubscribed,(track,publication,participant)=>{
       if(track.kind==="audio"){
         const audio=track.attach();audio.autoplay=true;
@@ -754,10 +922,13 @@ async function joinVoice(){
         element.remove();
       });
     });
-    room.on(LivekitClient.RoomEvent.Disconnected,()=>{
+    room.on(LivekitClient.RoomEvent.Disconnected,(reason)=>{
       if(activeRoom===livekitRoom && !leavingVoice){
+        const kicked=reason===LivekitClient.DisconnectReason?.PARTICIPANT_REMOVED ||
+          String(reason).includes("PARTICIPANT_REMOVED");
         playNotificationSound("leave");
-        resetVoiceUi("Ses bağlantısı kesildi.",activeRoom);
+        resetVoiceUi(kicked?"Yetkili tarafından odadan çıkarıldın.":"Ses bağlantısı kesildi.",activeRoom);
+        if(kicked)toast("Yetkili tarafından odadan çıkarıldın.");
       }
     });
     room.on(LivekitClient.RoomEvent.ActiveSpeakersChanged,speakers=>{
@@ -927,6 +1098,7 @@ async function subscribeMessages(){
          payload.new.user_id!==currentUser?.id) notifyIncomingChat();
       void loadMessages();
     })
+    .on("broadcast",{event:"chat-cleared"},()=>{void loadMessages();})
     .on("broadcast",{event:"message-ping"},({payload})=>{
       if(payload?.sender_id && payload.sender_id!==currentUser?.id){
         notifyIncomingChat();
@@ -941,7 +1113,7 @@ async function logout(){
   if(voicePresenceChannel) await db.removeChannel(voicePresenceChannel);
   if(chatChannel) await db.removeChannel(chatChannel);
   await db.auth.signOut();
-  currentUser=null; currentUsername=null; location.reload();
+  currentUser=null; currentUsername=null; moderationRole="member"; moderationAccounts=[];location.reload();
 }
 
 document.addEventListener("pointerdown",unlockNotificationAudio,{passive:true});
@@ -959,6 +1131,7 @@ $("join-btn").addEventListener("click",joinVoice);
 $("mute-btn").addEventListener("click",toggleMute);
 $("leave-btn").addEventListener("click",leaveVoice);
 $("logout-btn").addEventListener("click",logout);
+$("clear-chat-btn").addEventListener("click",clearChatAsModerator);
 document.querySelectorAll("[data-room]").forEach(button=>button.addEventListener("click",()=>selectRoom(button.dataset.room)));
 
 // Sekme kapanırken Presence bağlantısı kesilir; Supabase Presence de bağlantı kaybını temizler.
