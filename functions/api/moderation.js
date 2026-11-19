@@ -1,4 +1,4 @@
-import { extendTimedMute, setTimedMutePermission } from "./_timed-mute.js";
+import { clearTimedMute, extendTimedMute, isTimedMutePermission, muteExpiry, setTimedMutePermission } from "./_timed-mute.js";
 // Bir Artı Bir - Cloudflare Pages Functions. Bu dosya SUNUCUDA çalışır.
 // Yetki, istemciden gelen role/username'a değil Supabase Auth user.id ve account_roles'a dayanır.
 const SUPABASE_URL = "https://bariaxpogmteuxsvbhjo.supabase.co";
@@ -19,7 +19,7 @@ function adminHeaders(secret, extra = {}) {
 }
 async function dbCall(secret, table, query, method = "GET", body) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
-    method, headers:adminHeaders(secret, method === "PATCH" ? {Prefer:"return=representation"} : {}),
+    method, cache:"no-store", headers:adminHeaders(secret, method === "PATCH" ? {Prefer:"return=representation"} : {}),
     ...(body === undefined ? {} : {body:JSON.stringify(body)})
   });
   if (!res.ok) {
@@ -229,7 +229,7 @@ async function handler(request, env, isPost) {
       if(!Array.isArray(changed)||changed.length!==1) return reply({error:"Yetki kaydı güncellenemedi"},409);
       return reply({success:true,message:data.newRole==="admin"?"Admin yetkisi verildi":"Admin yetkisi kaldırıldı"});
     }
-    if(!["kick","move","mute","mute_timed"].includes(data.action)) return reply({error:"Bilinmeyen işlem"},400);
+    if(!["kick","move","mute","mute_timed","unmute"].includes(data.action)) return reply({error:"Bilinmeyen işlem"},400);
     if(!ROOMS.has(data.room)) return reply({error:"Geçersiz oda"},400);
     if(data.action==="move" && (!ROOMS.has(data.destinationRoom)||data.destinationRoom===data.room))
       return reply({error:"Geçerli farklı bir hedef oda seç"},400);
@@ -243,6 +243,16 @@ async function handler(request, env, isPost) {
     if(data.action==="move") {
       await roomCall(env,"MoveParticipant",data.room,{room:data.room,identity:targetUserId,destination_room:data.destinationRoom},data.destinationRoom);
       return reply({success:true,message:"Kullanıcı diğer odaya taşındı"});
+    }
+    if(data.action==="unmute") {
+      await clearTimedMute(env,targetUserId);
+      if(isTimedMutePermission(person.permission) && await muteExpiry(env,targetUserId)<=Date.now()) {
+        await setTimedMutePermission(roomCall,env,data.room,person,false);
+        if(await muteExpiry(env,targetUserId)>Date.now()){
+          await setTimedMutePermission(roomCall,env,data.room,person,true);
+        }
+      }
+      return reply({success:true,message:"Susturma kaldırıldı. Kullanıcı mikrofonunu açabilir."});
     }
     if(data.action==="mute_timed") {
       if(![30,120].includes(data.seconds)) return reply({error:"Geçersiz susturma süresi"},400);

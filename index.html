@@ -620,14 +620,31 @@ async function moderationRequest(payload){
   if(!response.ok) throw new Error(result.error||"Yetki işlemi başarısız ("+response.status+")");
   return result;
 }
+let moderationRefreshRevision=0;
+let moderationRefreshTimer=null;
+let moderationFallbackTimer=null;
+
+function queueModerationRefresh(){
+  if(!currentUser || moderationRefreshTimer!==null) return;
+  moderationRefreshTimer=setTimeout(()=>{
+    moderationRefreshTimer=null;
+    void refreshModerationStatus();
+  },250);
+}
+
 async function refreshModerationStatus(){
+  const user=currentUser;
+  if(!user) return;
+  const revision=++moderationRefreshRevision;
   try{
     const result=await moderationRequest();
+    if(currentUser!==user || revision!==moderationRefreshRevision) return;
     moderationRole=result.role||"member";
     moderationAccounts=Array.isArray(result.accounts)?result.accounts:[];
     renderOwnerPanel();
     renderSidebarVoiceUsers();
   }catch(error){
+    if(currentUser!==user || revision!==moderationRefreshRevision) return;
     moderationRole="member";moderationAccounts=[];
     renderOwnerPanel();renderSidebarVoiceUsers();
     console.warn("Yetki bilgileri yüklenemedi:",error);
@@ -660,6 +677,8 @@ function renderOwnerPanel(){
         btn.disabled=true;
         try{
           const result=await moderationRequest({action:"set_role",targetUserId:account.user_id,newRole:nextRole});
+          // This message only invalidates the UI. Role data is always loaded from the server.
+          if(chatChannel) void chatChannel.send({type:"broadcast",event:"roles-changed",payload:{}}).catch(console.warn);
           toast(result.message||"Yetki değiştirildi");
           await refreshModerationStatus();
         }catch(error){toast(error.message);btn.disabled=false;}
@@ -711,7 +730,7 @@ function renderOwnerPanel(){
 }
 async function actOnVoice(targetId, targetName, action, destinationRoom, button, seconds){
   if(!targetId || !["owner","admin"].includes(moderationRole)) return;
-  const messages={kick:"odadan çıkarılsın mı?",mute:"mikrofonu susturulsun mu?",mute_timed:(seconds===30?"30 saniye":"2 dakika")+" susturulsun mu?",move:MOD_ROOMS[destinationRoom]+" odasına taşınsın mı?"};
+  const messages={kick:"odadan çıkarılsın mı?",mute:"mikrofonu susturulsun mu?",unmute:"için susturma kaldırılsın mı?",mute_timed:(seconds===30?"30 saniye":"2 dakika")+" susturulsun mu?",move:MOD_ROOMS[destinationRoom]+" odasına taşınsın mı?"};
   if(!confirm(targetName+" "+messages[action]))return;
   button.disabled=true;
   try{
@@ -732,6 +751,10 @@ function ensureModeratorActions(row,person){
   const body=row.querySelector(".voice-person-body");
   if(!body) return;
   const controls=document.createElement("div");controls.className="mod-person-actions";
+  const unmuteButton=document.createElement("button");
+  unmuteButton.type="button";
+  unmuteButton.textContent="Susturmayı kaldır";
+  unmuteButton.addEventListener("click",()=>void actOnVoice(person.user_id,person.username,"unmute",null,unmuteButton));
   const muteButton=document.createElement("button");muteButton.type="button";muteButton.textContent="🎤 Sustur";
   muteButton.addEventListener("click",()=>{
     const seconds=Number(duration.value);
@@ -753,7 +776,7 @@ function ensureModeratorActions(row,person){
     if(select.value===selectedRoom){toast("Farklı bir oda seç");return;}
     void actOnVoice(person.user_id,person.username,"move",select.value,moveButton);
   });
-  controls.append(duration,muteButton,kickButton,select,moveButton);
+  controls.append(duration,muteButton,unmuteButton,kickButton,select,moveButton);
   body.append(controls);
 }
 async function clearChatAsModerator(){
@@ -870,6 +893,8 @@ async function startAuthenticatedApp(user,name,type){
   await loadMessages();
   await subscribeMessages();
   void refreshModerationStatus();
+  clearInterval(moderationFallbackTimer);
+  moderationFallbackTimer=setInterval(queueModerationRefresh,20000);
   if(type==="registered")startAccessPolling();
 }
 async function login(){
@@ -1518,6 +1543,8 @@ async function joinVoice(){
           renderSidebarVoiceUsers();
           void publishVoiceState(true);
           scheduleTimedMuteCheck(room,0);
+        }else if(timedMuteActive){
+          scheduleTimedMuteCheck(room,0);
         }
       });
     }
@@ -1822,6 +1849,7 @@ async function subscribeMessages(){
          payload.new.user_id!==currentUser?.id) notifyIncomingChat();
       void loadMessages();
     })
+    .on("broadcast",{event:"roles-changed"},queueModerationRefresh)
     .on("broadcast",{event:"chat-cleared"},()=>{void loadMessages();})
     .on("broadcast",{event:"message-ping"},({payload})=>{
       if(payload?.sender_id && payload.sender_id!==currentUser?.id){
@@ -1829,9 +1857,11 @@ async function subscribeMessages(){
         void loadMessages();
       }
     })
-    .subscribe();
+    .subscribe(status=>{if(status==="SUBSCRIBED") queueModerationRefresh();});
 }
 async function logout(){
+  clearInterval(moderationFallbackTimer);
+  clearTimeout(moderationRefreshTimer);
   if(accessPollTimer!==null){clearInterval(accessPollTimer);accessPollTimer=null;}
   await leaveVoice();
   if(onlineChannel) await db.removeChannel(onlineChannel);
@@ -1841,6 +1871,7 @@ async function logout(){
   currentUser=null; currentUsername=null; moderationRole="member"; moderationAccounts=[];location.reload();
 }
 
+window.addEventListener("focus",queueModerationRefresh);
 document.addEventListener("pointerdown",unlockNotificationAudio,{passive:true});
 document.addEventListener("keydown",unlockNotificationAudio);
 document.querySelectorAll("[data-auth]").forEach(button=>button.addEventListener("click",()=>setAuthMode(button.dataset.auth)));
