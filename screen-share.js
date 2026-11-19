@@ -32,7 +32,7 @@ async function startScreenCapture() {
   setText("screen-share-status","");
   try {
     capture.stream = await navigator.mediaDevices.getDisplayMedia({
-      video:{frameRate:{ideal:30,max:30}},
+      video:{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:24,max:24}},
       audio:true,
       systemAudio:"include",
       windowAudio:"window",
@@ -41,6 +41,12 @@ async function startScreenCapture() {
     if (screenCapture !== capture) return removeScreenCapture(capture);
     const video = capture.stream.getVideoTracks()[0];
     if (!video) throw new Error("Görüntü alınamadı.");
+    video.contentHint = "motion";
+    if (typeof video.applyConstraints === "function") {
+      await video.applyConstraints({width:{max:1280},height:{max:720},frameRate:{max:24}})
+        .catch(()=>{ /* Some capture sources manage their own resolution. */ });
+    }
+    if (screenCapture !== capture) return removeScreenCapture(capture);
     video.addEventListener("ended",()=>{
       if (screenCapture === capture) stopScreenCapture();
     },{once:true});
@@ -50,7 +56,11 @@ async function startScreenCapture() {
     for (const [track,source] of tracks) {
       if (!track || track.readyState === "ended") continue;
       try {
-        await room.localParticipant.publishTrack(track,{source});
+        const options = source === "screen_share" ? {
+          source, screenShareEncoding:{maxBitrate:1500000,maxFramerate:24},
+          degradationPreference:"maintain-framerate", simulcast:true
+        } : {source,dtx:false};
+        await room.localParticipant.publishTrack(track,options);
       } catch (error) {
         if (source !== "screen_share_audio" || screenCapture !== capture) throw error;
         track.stop();
@@ -68,7 +78,7 @@ async function startScreenCapture() {
     }
     if (video.readyState === "ended") return stopScreenCapture();
     setText("screen-share-status",audioPublished ? "Ekran ve ses paylaşılıyor." :
-      "Ekran paylaşılıyor. Yayına ses eklemek için paylaşım penceresinde ses seçeneğini işaretle.");
+      "Ekran paylaşılıyor, oyun sesi alınmadı. Paylaşımı yeniden başlatıp açılan pencerede ses seçeneğini işaretle. Pencerede seçenek yoksa ses destekli bir kaynak seç.");
   } catch (error) {
     const current = screenCapture === capture;
     removeScreenCapture(capture);
@@ -84,35 +94,66 @@ function stopScreenCapture() {
 }
 
 function detachScreenViewer(viewer) {
-  for (const element of viewer.media.querySelectorAll("video,audio")) {
-    element.pause();
-    if (element.tagName === "VIDEO") viewer.video?.detach(element);
-    else viewer.audio?.detach(element);
-    element.remove();
+  const player = viewer.player;
+  if (!player) return;
+  viewer.attachedAudio?.detach(player);
+  viewer.attachedVideo?.detach(player);
+  player.pause();
+  player.remove();
+  viewer.player = null;
+  viewer.attachedAudio = null;
+  viewer.attachedVideo = null;
+  viewer.soundButton.hidden = true;
+}
+
+async function playScreenSound(viewer, player) {
+  player.muted = false;
+  try {
+    await player.play();
+    if (viewer.player === player && !player.muted) viewer.soundButton.hidden = true;
+  } catch {
+    if (viewer.player !== player || !viewer.audio) return;
+    player.muted = true;
+    viewer.soundButton.hidden = false;
+    void player.play().catch(()=>{});
   }
 }
 
 function paintScreenViewer(viewer) {
-  detachScreenViewer(viewer);
   viewer.button.textContent = viewer.watching ? "İzlemeyi bırak" : "Yayını izle";
   viewer.label.textContent = (viewer.participant.name || "Arkadaş") + " · Ekran yayını";
   viewer.label.id = viewer.titleId;
   viewer.button.setAttribute("aria-describedby",viewer.titleId);
-  if (!viewer.watching || !viewer.video) return;
-  const video = viewer.video.attach();
-  video.autoplay = true;
-  video.playsInline = true;
-  video.muted = true;
-  video.controls = true;
-  video.setAttribute("aria-label","Ekran yayını");
-  viewer.media.appendChild(video);
-  if (viewer.audio) {
-    const audio = viewer.audio.attach();
-    audio.autoplay = true;
-    audio.controls = true;
-    audio.setAttribute("aria-label","Ekran yayını sesi");
-    viewer.media.appendChild(audio);
-    void audio.play().catch(()=>{ /* Native controls allow playback after a browser autoplay block. */ });
+  if (!viewer.watching || !viewer.video) {
+    detachScreenViewer(viewer);
+    return;
+  }
+  if (!viewer.player) {
+    const player = document.createElement("video");
+    player.autoplay = true;
+    player.playsInline = true;
+    player.muted = true;
+    player.controls = true;
+    player.setAttribute("aria-label","Ekran yayını");
+    viewer.player = player;
+    viewer.media.appendChild(player);
+  }
+  const player = viewer.player;
+  if (viewer.attachedVideo !== viewer.video) {
+    viewer.attachedVideo?.detach(player);
+    viewer.video.attach(player);
+    viewer.attachedVideo = viewer.video;
+  }
+  if (viewer.attachedAudio !== viewer.audio) {
+    viewer.attachedAudio?.detach(player);
+    viewer.attachedAudio = viewer.audio;
+    if (viewer.audio) {
+      viewer.audio.attach(player);
+      void playScreenSound(viewer,player);
+    } else {
+      player.muted = true;
+      viewer.soundButton.hidden = true;
+    }
   }
 }
 
@@ -132,9 +173,17 @@ function refreshScreenViewer(track,publication,participant,removed=false) {
     button.type = "button";
     button.className = "muted-btn";
     const media = document.createElement("div");
-    row.append(label,button,media);
-    viewer = {participant,row,label,button,media,titleId:"screen-viewer-"+(++screenViewerSequence),
-      watching:false,video:null,audio:null};
+    const soundButton = document.createElement("button");
+    soundButton.type = "button";
+    soundButton.className = "muted-btn";
+    soundButton.textContent = "Yayın sesini aç";
+    soundButton.hidden = true;
+    row.append(label,button,soundButton,media);
+    viewer = {participant,row,label,button,soundButton,media,titleId:"screen-viewer-"+(++screenViewerSequence),
+      watching:false,video:null,audio:null,player:null,attachedVideo:null,attachedAudio:null};
+    soundButton.addEventListener("click",()=>{
+      if (viewer.player && viewer.audio) void playScreenSound(viewer,viewer.player);
+    });
     screenShares.set(key,viewer);
     button.addEventListener("click",()=>{
       viewer.watching = !viewer.watching;
@@ -142,10 +191,9 @@ function refreshScreenViewer(track,publication,participant,removed=false) {
     });
   }
   if (removed && viewer[type] !== track) return;
-  // Detach using the currently attached track before replacing references.
-  detachScreenViewer(viewer);
   viewer[type] = removed ? null : track;
   if (!viewer.video) {
+    detachScreenViewer(viewer);
     viewer.row.remove();
     if (!viewer.audio) screenShares.delete(key);
     return;
