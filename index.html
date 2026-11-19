@@ -62,6 +62,8 @@
     .me-info strong,.me-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .me-info small{color:var(--muted)}
     .main{flex:1;min-width:0;padding:32px;display:flex;flex-direction:column;gap:18px;max-width:1250px;margin:0 auto;width:100%}
+    .timed-mute-badge{display:block;color:#ffb9bc;font-size:11px;font-variant-numeric:tabular-nums;margin-top:2px}
+    .timed-mute-badge[hidden]{display:none}
     .top-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
     #refresh-app-btn{white-space:nowrap;padding:6px 10px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:12px}
@@ -438,6 +440,7 @@ async function subscribeVoicePresence(roomName=selectedRoom){
   if(!currentUser) return;
   const generation=++voiceChannelVersion;
   clearVoiceHeartbeat();
+  clearRoomMutes();
   const oldChannel=voicePresenceChannel;
   voicePresenceChannel=null;
   voiceMembers.clear();
@@ -450,6 +453,9 @@ async function subscribeVoicePresence(roomName=selectedRoom){
   channel.on("broadcast",{event:"voice-state"},({payload})=>{
     if(channel!==voicePresenceChannel) return;
     updateVoiceMember(payload);
+  });
+  channel.on("broadcast",{event:"voice-mutes-changed"},()=>{
+    if(channel===voicePresenceChannel) queueRoomMuteRefresh();
   });
   channel.on("broadcast",{event:"voice-who"},()=>{
     if(channel===voicePresenceChannel && selectedRoom===roomName && livekitRoom && !leavingVoice){
@@ -464,6 +470,7 @@ async function subscribeVoicePresence(roomName=selectedRoom){
     if(channel!==voicePresenceChannel) return;
     if(livekitRoom && !leavingVoice) void publishVoiceState(true);
     expireVoiceMembers();
+    queueRoomMuteRefresh();
   },20000);
   renderSidebarVoiceUsers();
 }
@@ -507,6 +514,79 @@ function remoteMicMuted(participant){
   // Yayın yoksa mikrofon açık değildir.
   return publication ? Boolean(publication.isMuted) : true;
 }
+const roomMuteEnds=new Map();
+let roomMuteTick=null;
+let roomMuteRefresh=null;
+let roomMuteRequest=0;
+let roomMuteRoster="";
+
+function clearRoomMutes(){
+  roomMuteEnds.clear();
+  clearInterval(roomMuteTick);
+  clearTimeout(roomMuteRefresh);
+  roomMuteTick=null;
+  roomMuteRefresh=null;
+  roomMuteRequest++;
+  roomMuteRoster="";
+}
+
+function roomMuteText(end, now){
+  const seconds=Math.max(0,Math.ceil((end-now)/1000));
+  return seconds ? "Susturuldu · "+Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0") : "";
+}
+
+function paintRoomMuteBadges(){
+  const now=performance.now();
+  for(const [id,end] of roomMuteEnds) if(end<=now) roomMuteEnds.delete(id);
+  for(const row of $("sidebar-voice-users").querySelectorAll(".sidebar-person[data-user-id]")){
+    const badge=row.querySelector(".timed-mute-badge");
+    const text=roomMuteText(roomMuteEnds.get(row.dataset.userId)||0,now);
+    if(badge && badge.textContent!==text) badge.textContent=text;
+    if(badge) badge.hidden=!text;
+  }
+  if(!roomMuteEnds.size){
+    clearInterval(roomMuteTick);
+    roomMuteTick=null;
+  }
+}
+
+function queueRoomMuteRefresh(){
+  if(!currentUser || roomMuteRefresh!==null) return;
+  roomMuteRefresh=setTimeout(()=>{
+    roomMuteRefresh=null;
+    void refreshRoomMutes();
+  },200);
+}
+
+async function refreshRoomMutes(){
+  const room=selectedRoom;
+  const channel=voicePresenceChannel;
+  if(!currentUser || !channel || !roomMuteRoster) return;
+  const request=++roomMuteRequest;
+  try{
+    const {data:{session}}=await db.auth.getSession();
+    if(!session?.access_token || request!==roomMuteRequest) return;
+    const response=await fetch("/api/room-mutes",{
+      method:"POST",cache:"no-store",signal:AbortSignal.timeout(8000),
+      headers:{"Content-Type":"application/json",Authorization:"Bearer "+session.access_token},
+      body:JSON.stringify({roomName:room})
+    });
+    if(!response.ok) return;
+    const result=await response.json();
+    if(request!==roomMuteRequest || channel!==voicePresenceChannel || room!==selectedRoom) return;
+    const now=performance.now();
+    roomMuteEnds.clear();
+    for(const item of result.mutes){
+      const remaining=Date.parse(item.expires_at)-result.now;
+      if(remaining>0) roomMuteEnds.set(item.user_id,now+remaining);
+    }
+    paintRoomMuteBadges();
+    if(roomMuteEnds.size && roomMuteTick===null) roomMuteTick=setInterval(paintRoomMuteBadges,250);
+  }catch{
+    // The next presence heartbeat retries temporary connection failures.
+  }
+}
+
 function renderSidebarVoiceUsers(){
   const box=$("sidebar-voice-users");if(!box) return;
   const people=new Map();
@@ -533,6 +613,11 @@ function renderSidebarVoiceUsers(){
     }
   }
   const list=[...people.values()].sort((a,b)=>(a.username||"").localeCompare(b.username||"","tr"));
+  const roster=list.map(person=>person.user_id).sort().join(",");
+  if(roomMuteRoster!==roster){
+    roomMuteRoster=roster;
+    if(roster) queueRoomMuteRefresh();
+  }
   setText("voice-count","("+list.length+")");
   if(!list.length){
     box.replaceChildren();
@@ -561,7 +646,10 @@ function renderSidebarVoiceUsers(){
       const avatar=document.createElement("div");avatar.className="avatar";
       const details=document.createElement("div");details.className="voice-person-body";
       const name=document.createElement("strong");name.className="voice-person-name";
-      details.appendChild(name);
+      const badge=document.createElement("span");
+      badge.className="timed-mute-badge";
+      badge.hidden=true;
+      details.append(name,badge);
       if(!isSelf && !isMusicBot && livekitRoom){
         const control=document.createElement("label");control.className="voice-volume";
         const slider=document.createElement("input");
@@ -609,6 +697,7 @@ function renderSidebarVoiceUsers(){
     if(!isMusicBot) ensureModeratorActions(row,person);
     if(box.children[index]!==row)box.insertBefore(row,box.children[index]||null);
   });
+  paintRoomMuteBadges();
 }
 
 // ADMIN / KURUCU - Sunucu her isteği Supabase Auth + account_roles ile yeniden doğrular.
@@ -738,10 +827,18 @@ async function actOnVoice(targetId, targetName, action, destinationRoom, button,
   const messages={kick:"odadan çıkarılsın mı?",mute:"mikrofonu susturulsun mu?",unmute:"için susturma kaldırılsın mı?",mute_timed:(seconds===30?"30 saniye":"2 dakika")+" susturulsun mu?",move:MOD_ROOMS[destinationRoom]+" odasına taşınsın mı?"};
   if(!confirm(targetName+" "+messages[action]))return;
   button.disabled=true;
+  const room=selectedRoom;
+  const channel=voicePresenceChannel;
   try{
-    const result=await moderationRequest({action,room:selectedRoom,targetUserId:targetId,
+    const result=await moderationRequest({action,room,targetUserId:targetId,
       ...(action==="move"?{destinationRoom}:{}),
       ...(action==="mute_timed"?{seconds}:{})});
+    if(action==="mute_timed" || action==="unmute"){
+      if(room===selectedRoom) queueRoomMuteRefresh();
+      if(channel && channel===voicePresenceChannel){
+        void channel.send({type:"broadcast",event:"voice-mutes-changed",payload:{}}).catch(console.warn);
+      }
+    }
     toast(result.message||"İşlem tamamlandı");
   }catch(error){toast(error.message);}
   finally{button.disabled=false;}
@@ -1865,6 +1962,7 @@ async function subscribeMessages(){
     .subscribe(status=>{if(status==="SUBSCRIBED") queueModerationRefresh();});
 }
 async function logout(){
+  clearRoomMutes();
   clearInterval(moderationFallbackTimer);
   clearTimeout(moderationRefreshTimer);
   if(accessPollTimer!==null){clearInterval(accessPollTimer);accessPollTimer=null;}

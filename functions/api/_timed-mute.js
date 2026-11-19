@@ -43,3 +43,14 @@ export async function setTimedMutePermission(roomCall, env, room, person, muted)
     permission: { ...properties, canPublishSources: muted ? [1, 3, 4] : [1, 2, 3, 4] }
   });
 }
+
+export async function activeRoomMutes(env, identities, now) {
+  const ids = identities.filter(id => /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id));
+  if (!ids.length) return [];
+  const filters = new URLSearchParams({
+    select: "user_id,expires_at",
+    user_id: "in.(" + ids.join(",") + ")",
+    expires_at: "gt." + new Date(now).toISOString()
+  });
+  return muteData(env, "timed_voice_mutes?" + filters);
+}
