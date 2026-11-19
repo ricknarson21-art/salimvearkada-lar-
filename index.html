@@ -62,6 +62,8 @@
     .me-info strong,.me-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .me-info small{color:var(--muted)}
     .main{flex:1;min-width:0;padding:32px;display:flex;flex-direction:column;gap:18px;max-width:1250px;margin:0 auto;width:100%}
+    .top-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+    #refresh-app-btn{white-space:nowrap;padding:6px 10px}
     .top{display:flex;justify-content:space-between;align-items:center;gap:12px}
     .top h1{font-size:28px;margin:0}
     .status-pill{font-size:12px;color:#b9f1d8;background:#1d463b;padding:7px 11px;border-radius:20px;white-space:nowrap}
@@ -143,7 +145,10 @@
       </div>
     </aside>
     <main class="main">
-      <div class="top"><h1>Arkadaş odası</h1><span class="status-pill" id="connection-state">Bağlanıyor…</span></div>
+      <div class="top"><h1>Arkadaş odası</h1><div class="top-actions">
+        <button id="refresh-app-btn" type="button" class="muted-btn" title="Sitenin son sürümünü yükle">Güncelle</button>
+        <span class="status-pill" id="connection-state">Bağlanıyor…</span>
+      </div></div>
       <section class="card">
         <div class="voice-room-layout">
           <div>
@@ -1871,6 +1876,12 @@ async function logout(){
   currentUser=null; currentUsername=null; moderationRole="member"; moderationAccounts=[];location.reload();
 }
 
+$("refresh-app-btn").addEventListener("click",()=>{
+  if((livekitRoom || joiningVoice) && !confirm("Güncelleme ses odası bağlantını kapatacak. Devam edilsin mi?")) return;
+  const url=new URL(window.location.href);
+  url.searchParams.set("ui",Date.now().toString());
+  window.location.replace(url.href);
+});
 window.addEventListener("focus",queueModerationRefresh);
 document.addEventListener("pointerdown",unlockNotificationAudio,{passive:true});
 document.addEventListener("keydown",unlockNotificationAudio);
