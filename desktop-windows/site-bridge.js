@@ -1,6 +1,11 @@
 (() => {
   if (window.top !== window || location.origin !== "https://birartibir.online") return;
 
+  document.addEventListener("DOMContentLoaded",()=>{
+    const refresh = document.getElementById("refresh-app-btn");
+    if (refresh) refresh.style.display = "none";
+  },{once:true});
+
   let lastConfiguration = null;
   let nativeKeyDown = null;
 

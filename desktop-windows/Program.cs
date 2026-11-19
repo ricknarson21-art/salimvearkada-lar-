@@ -64,7 +64,7 @@ internal sealed class DesktopWindow : Form
         updateMenu.DropDownItems.Add(new ToolStripMenuItem("Sürüm " + DesktopUpdates.Installed) { Enabled = false });
         updateMenu.DropDownItems.Add(checkUpdate);
         updateMenu.DropDownItems.Add(downloadUpdate);
-        checkUpdate.Click += async (_, _) => await CheckForUpdateAsync(showResult: true);
+        checkUpdate.Click += async (_, _) => await RefreshSiteAndCheckAsync();
         downloadUpdate.Click += async (_, _) => await DownloadUpdateAsync();
         menu.Items.Add(updateMenu);
         MainMenuStrip = menu;
@@ -111,6 +111,23 @@ internal sealed class DesktopWindow : Form
         downloadUpdate.Enabled = !busy && availableUpdate != null;
     }
 
+    private async System.Threading.Tasks.Task RefreshSiteAndCheckAsync()
+    {
+        if (updateBusy) return;
+        var current = web;
+        if (current != null && IsSite(current.Source))
+        {
+            try
+            {
+                // The site button owns the voice-room confirmation and cache-busting behavior.
+                await current.ExecuteScriptAsync("document.getElementById('refresh-app-btn')?.click()");
+            }
+            catch (InvalidOperationException) { }
+            catch (COMException) { }
+        }
+        if (!IsDisposed) await CheckForUpdateAsync(showResult: true);
+    }
+
     private async System.Threading.Tasks.Task CheckForUpdateAsync(bool showResult)
     {
         if (updateBusy) return;
@@ -123,7 +140,7 @@ internal sealed class DesktopWindow : Form
             updateMenu.Text = release == null ? "Güncelleme" : "Güncelleme var";
             downloadUpdate.Text = release == null ? "Güncellemeyi indir" : $"v{release.Version} sürümünü indir";
             if (showResult && release == null)
-                MessageBox.Show(this, "Bir Artı Bir güncel.", Text, MessageBoxButtons.OK,
+                MessageBox.Show(this, "Windows sürümü güncel.", Text, MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
         }
         catch (Exception error)

@@ -14,6 +14,6 @@ Bir ses odasına bağlıyken başka bir pencereye geçince gösterge aktif pence
 
 ## Windows güncellemeleri
 
-Uygulama açıldığında yeni sürümü kontrol eder. **Güncelleme** menüsünden elle de kontrol edebilirsin. Yeni sürüm varsa kurulum dosyasını indir ve kurmayı onayla.
+Uygulama açıldığında yeni sürümü kontrol eder. **Güncelleme → Güncellemeleri denetle** hem site arayüzünü yeniler hem Windows sürümünü kontrol eder. Ses odasındaysan arayüzü yenilemeden önce onay ister. Yeni sürüm varsa kurulum dosyasını indir ve kurmayı onayla.
 
 Bir sürümü yayınlamak için Windows kurulum dosyasını Cloudflare Pages üzerindeki `desktop-update/` dizinine `BirArtiBir-Setup-Windows-x64-vMAJOR.MINOR.PATCH.exe` adıyla ekle. Aynı dağıtımda `latest.json` dosyasına sürümü (`Version`) ve kurulum dosyasının SHA-256 özetini (`Sha256`) yaz.
