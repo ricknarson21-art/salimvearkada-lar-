@@ -43,7 +43,10 @@
     .voice-volume input[type="range"]{min-width:0;width:100%;flex:1;accent-color:#60a5fa;cursor:pointer;margin:0}
     .voice-volume-value{color:var(--muted);font-size:11px;min-width:31px;text-align:right;font-variant-numeric:tabular-nums}
     .mic-status svg{display:block}
-    .mod-person-actions{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:3px}
+    .mod-menu-trigger{flex:none;font-size:16px;line-height:1;padding:3px 5px;background:#34445f}
+    .mod-person-actions{position:fixed;z-index:180;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px;padding:10px;width:min(225px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:auto;background:#192a40;border:1px solid #456080;border-radius:9px;box-shadow:0 8px 22px #0008}
+    .mod-menu-title{grid-column:1/-1;overflow-wrap:anywhere;margin:0 0 4px;font-size:13px}
+    .mod-person-actions .mod-full-width{grid-column:1/-1}
     .mod-person-actions button{font-size:11px;padding:5px 7px;border-radius:6px;background:#34445f}
     .mod-person-actions button.kick{background:#862e41}
     .mod-person-actions select{font-size:11px;min-width:0;padding:4px;border:1px solid #456080;border-radius:6px;background:#192a40;color:#fff}
@@ -535,6 +538,7 @@ async function publishVoiceState(joined=Boolean(livekitRoom)){
 }
 async function subscribeVoicePresence(roomName=selectedRoom){
   if(!currentUser) return;
+  closeVoiceModerationPanel();
   const generation=++voiceChannelVersion;
   clearVoiceHeartbeat();
   clearRoomMutes();
@@ -719,6 +723,7 @@ function renderSidebarVoiceUsers(){
   if(!list.length){
     box.replaceChildren();
     box.innerHTML='<div class="empty">Henüz kimse katılmadı.</div>';
+    closeVoiceModerationPanel();
     return;
   }
 
@@ -795,6 +800,7 @@ function renderSidebarVoiceUsers(){
     if(box.children[index]!==row)box.insertBefore(row,box.children[index]||null);
   });
   paintRoomMuteBadges();
+  if(voiceModerationPanel && !voiceModerationPanel.row.isConnected) closeVoiceModerationPanel();
 }
 
 // ADMIN / KURUCU - Sunucu her isteği Supabase Auth + account_roles ile yeniden doğrular.
@@ -940,30 +946,84 @@ async function actOnVoice(targetId, targetName, action, destinationRoom, button,
   }catch(error){toast(error.message);}
   finally{button.disabled=false;}
 }
+let voiceModerationPanel=null;
+
+function mayModerateVoice(person){
+  const targetRole=moderationAccounts.find(account=>account.user_id===person.user_id)?.role||"member";
+  return (moderationRole==="owner" && targetRole!=="owner" ||
+    moderationRole==="admin" && targetRole==="member") && person.user_id!==currentUser?.id;
+}
+
+function closeVoiceModerationPanel(restoreFocus=false){
+  if(!voiceModerationPanel) return;
+  const {panel,trigger}=voiceModerationPanel;
+  voiceModerationPanel=null;
+  panel.remove();
+  trigger.setAttribute("aria-expanded","false");
+  if(restoreFocus && trigger.isConnected) trigger.focus();
+}
+
 function ensureModeratorActions(row,person){
-  const existing=row.querySelector(".mod-person-actions");
-  const targetRole=moderationAccounts.find(a=>a.user_id===person.user_id)?.role||"member";
-  const allowed=(moderationRole==="owner"&&targetRole!=="owner" ||
-    moderationRole==="admin"&&targetRole==="member") && person.user_id!==currentUser?.id;
-  if(!allowed){if(existing)existing.remove();return;}
-  if(existing) return;
-  const body=row.querySelector(".voice-person-body");
-  if(!body) return;
-  const controls=document.createElement("div");controls.className="mod-person-actions";
+  const existing=row.querySelector(".mod-menu-trigger");
+  if(!mayModerateVoice(person)){
+    if(voiceModerationPanel?.row===row) closeVoiceModerationPanel();
+    existing?.remove();
+    row.oncontextmenu=null;
+    return;
+  }
+  const trigger=existing||document.createElement("button");
+  if(!existing){
+    trigger.type="button";
+    trigger.className="mod-menu-trigger";
+    trigger.textContent="⋯";
+    trigger.setAttribute("aria-expanded","false");
+    row.appendChild(trigger);
+  }
+  trigger.setAttribute("aria-label",person.username+" için yetki işlemleri");
+  trigger.title="Yetki işlemleri";
+  trigger.onclick=()=>{
+    if(voiceModerationPanel?.row===row) return closeVoiceModerationPanel(true);
+    const rect=trigger.getBoundingClientRect();
+    openVoiceModerationPanel(row,person,trigger,rect.left,rect.bottom+5);
+  };
+  row.oncontextmenu=event=>{
+    if(!mayModerateVoice(person)) return;
+    event.preventDefault();
+    const rect=row.getBoundingClientRect();
+    openVoiceModerationPanel(row,person,trigger,event.clientX||rect.left,event.clientY||rect.bottom);
+  };
+}
+
+function openVoiceModerationPanel(row,person,trigger,x,y){
+  if(!mayModerateVoice(person)) return;
+  closeVoiceModerationPanel();
+  const room=selectedRoom;
+  const controls=document.createElement("div");
+  controls.className="mod-person-actions";
+  controls.setAttribute("role","group");
+  controls.setAttribute("aria-label",person.username+" için yetki işlemleri");
+  const title=document.createElement("strong");
+  title.className="mod-menu-title";
+  title.textContent=person.username;
+  const run=(action,destination,button,seconds)=>{
+    if(room!==selectedRoom || !mayModerateVoice(person)) return closeVoiceModerationPanel();
+    closeVoiceModerationPanel(true);
+    void actOnVoice(person.user_id,person.username,action,destination,button,seconds);
+  };
   const unmuteButton=document.createElement("button");
   unmuteButton.type="button";
   unmuteButton.textContent="Susturmayı kaldır";
-  unmuteButton.addEventListener("click",()=>void actOnVoice(person.user_id,person.username,"unmute",null,unmuteButton));
+  unmuteButton.addEventListener("click",()=>run("unmute",null,unmuteButton));
   const muteButton=document.createElement("button");muteButton.type="button";muteButton.textContent="🎤 Sustur";
   muteButton.addEventListener("click",()=>{
     const seconds=Number(duration.value);
-    void actOnVoice(person.user_id,person.username,seconds?"mute_timed":"mute",null,muteButton,seconds);
+    run(seconds?"mute_timed":"mute",null,muteButton,seconds);
   });
   const duration=document.createElement("select");
   duration.setAttribute("aria-label","Susturma süresi");
   duration.append(new Option("30 saniye","30"),new Option("2 dakika","120"),new Option("Anlık","0"));
   const kickButton=document.createElement("button");kickButton.type="button";kickButton.className="kick";kickButton.textContent="🚪 At";
-  kickButton.addEventListener("click",()=>actOnVoice(person.user_id,person.username,"kick",null,kickButton));
+  kickButton.addEventListener("click",()=>run("kick",null,kickButton));
   const select=document.createElement("select");select.setAttribute("aria-label","Taşınacak oda");
   for(const [key,label] of Object.entries(MOD_ROOMS)){
     const option=document.createElement("option");option.value=key;option.textContent=label;
@@ -973,11 +1033,37 @@ function ensureModeratorActions(row,person){
   const moveButton=document.createElement("button");moveButton.type="button";moveButton.textContent="➡ Taşı";
   moveButton.addEventListener("click",()=>{
     if(select.value===selectedRoom){toast("Farklı bir oda seç");return;}
-    void actOnVoice(person.user_id,person.username,"move",select.value,moveButton);
+    run("move",select.value,moveButton);
   });
-  controls.append(duration,muteButton,unmuteButton,kickButton,select,moveButton);
-  body.append(controls);
+  unmuteButton.classList.add("mod-full-width");
+  kickButton.classList.add("mod-full-width");
+  controls.append(title,duration,muteButton,unmuteButton,kickButton,select,moveButton);
+  document.body.appendChild(controls);
+  const {width,height}=controls.getBoundingClientRect();
+  controls.style.left=Math.max(8,Math.min(x,window.innerWidth-width-8))+"px";
+  controls.style.top=Math.max(8,Math.min(y,window.innerHeight-height-8))+"px";
+  voiceModerationPanel={panel:controls,row,trigger};
+  trigger.setAttribute("aria-expanded","true");
+  duration.focus({preventScroll:true});
 }
+
+document.addEventListener("pointerdown",event=>{
+  const active=voiceModerationPanel;
+  if(active && !active.panel.contains(event.target) && !active.trigger.contains(event.target)){
+    closeVoiceModerationPanel();
+  }
+});
+document.addEventListener("keydown",event=>{
+  if(event.key==="Escape" && voiceModerationPanel){
+    event.preventDefault();
+    closeVoiceModerationPanel(true);
+  }
+});
+window.addEventListener("resize",()=>closeVoiceModerationPanel());
+document.addEventListener("scroll",event=>{
+  if(voiceModerationPanel && !voiceModerationPanel.panel.contains(event.target)) closeVoiceModerationPanel();
+},true);
+
 async function clearChatAsModerator(){
   if(!confirm("TÜM sohbet geçmişi kalıcı olarak silinsin mi? Bu işlem geri alınamaz."))return;
   const button=$("clear-chat-btn");button.disabled=true;
