@@ -1,3 +1,4 @@
+import { muteExpiry, mutedSources } from "./_timed-mute.js";
 import { ALLOWED_ROOMS, authenticateVoiceUser } from "./_voice-auth.js";
 
 const encoder = new TextEncoder();
@@ -31,6 +32,8 @@ export async function onRequestPost({ request, env }) {
       return Response.json({ error: "Geçersiz ses odası" }, { status: 400 });
     }
 
+    const expiry = await muteExpiry(env, user.id);
+    const mutedUntil = expiry > Date.now() ? expiry : 0;
     const now = Math.floor(Date.now() / 1000);
     const payload = {
       iss: env.LIVEKIT_API_KEY,
@@ -43,12 +46,13 @@ export async function onRequestPost({ request, env }) {
         roomJoin: true,
         room: roomName,
         canPublish: true,
+        ...(mutedUntil ? { canPublishSources: mutedSources } : {}),
         canSubscribe: true
       }
     };
 
     const token = await signJWT(payload, env.LIVEKIT_API_SECRET);
-    return Response.json({ token, serverUrl: env.LIVEKIT_URL, roomName });
+    return Response.json({ token, serverUrl: env.LIVEKIT_URL, roomName, mutedUntil, now: Date.now() });
   } catch (error) {
     console.error("Token error:", error);
     return Response.json({ error: "Token could not be created" }, { status: 500 });
