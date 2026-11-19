@@ -32,7 +32,7 @@ async function startScreenCapture() {
   setText("screen-share-status","");
   try {
     capture.stream = await navigator.mediaDevices.getDisplayMedia({
-      video:{frameRate:{ideal:30,max:30}},
+      video:{width:{ideal:1920,max:1920},height:{ideal:1080,max:1080},frameRate:{ideal:30,max:30}},
       audio:true,
       systemAudio:"include",
       windowAudio:"window",
@@ -41,6 +41,7 @@ async function startScreenCapture() {
     if (screenCapture !== capture) return removeScreenCapture(capture);
     const video = capture.stream.getVideoTracks()[0];
     if (!video) throw new Error("Görüntü alınamadı.");
+    video.contentHint = "motion";
     video.addEventListener("ended",()=>{
       if (screenCapture === capture) stopScreenCapture();
     },{once:true});
@@ -50,7 +51,15 @@ async function startScreenCapture() {
     for (const [track,source] of tracks) {
       if (!track || track.readyState === "ended") continue;
       try {
-        const options = source === "screen_share_audio" ? {source,dtx:false} : {source};
+        const presets = LivekitClient.ScreenSharePresets;
+        const fallbackLayers = [presets?.h360fps15,presets?.h720fps30].filter(Boolean);
+        const options = source === "screen_share_audio" ? {source,dtx:false} : {
+          source,
+          screenShareEncoding:{maxBitrate:5000000,maxFramerate:30},
+          simulcast:true,
+          ...(fallbackLayers.length ? {screenShareSimulcastLayers:fallbackLayers} : {}),
+          degradationPreference:"maintain-framerate"
+        };
         await room.localParticipant.publishTrack(track,options);
       } catch (error) {
         if (source !== "screen_share_audio" || screenCapture !== capture) throw error;
