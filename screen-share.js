@@ -32,7 +32,7 @@ async function startScreenCapture() {
   setText("screen-share-status","");
   try {
     capture.stream = await navigator.mediaDevices.getDisplayMedia({
-      video:{width:{ideal:1280},height:{ideal:720},frameRate:{ideal:24,max:24}},
+      video:{frameRate:{ideal:30,max:30}},
       audio:true,
       systemAudio:"include",
       windowAudio:"window",
@@ -41,12 +41,6 @@ async function startScreenCapture() {
     if (screenCapture !== capture) return removeScreenCapture(capture);
     const video = capture.stream.getVideoTracks()[0];
     if (!video) throw new Error("Görüntü alınamadı.");
-    video.contentHint = "motion";
-    if (typeof video.applyConstraints === "function") {
-      await video.applyConstraints({width:{max:1280},height:{max:720},frameRate:{max:24}})
-        .catch(()=>{ /* Some capture sources manage their own resolution. */ });
-    }
-    if (screenCapture !== capture) return removeScreenCapture(capture);
     video.addEventListener("ended",()=>{
       if (screenCapture === capture) stopScreenCapture();
     },{once:true});
@@ -56,10 +50,7 @@ async function startScreenCapture() {
     for (const [track,source] of tracks) {
       if (!track || track.readyState === "ended") continue;
       try {
-        const options = source === "screen_share" ? {
-          source, screenShareEncoding:{maxBitrate:1500000,maxFramerate:24},
-          degradationPreference:"maintain-framerate", simulcast:true
-        } : {source,dtx:false};
+        const options = source === "screen_share_audio" ? {source,dtx:false} : {source};
         await room.localParticipant.publishTrack(track,options);
       } catch (error) {
         if (source !== "screen_share_audio" || screenCapture !== capture) throw error;
