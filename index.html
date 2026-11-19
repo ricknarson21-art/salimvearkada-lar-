@@ -79,6 +79,7 @@
     .online-person{display:flex;align-items:center;gap:9px;background:var(--panel3);border:1px solid #304768;border-radius:12px;padding:10px 13px;min-width:125px}
     .online-person .avatar{width:32px;height:32px;flex-basis:32px}
     .online-name{font-weight:600;overflow-wrap:anywhere}
+    .online-dot.offline{background:#f87171}
     .online-dot{width:9px;height:9px;border-radius:50%;background:var(--green);margin-left:auto;flex:none}
     .voice-controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
     .muted-btn{background:#34445f}
@@ -159,8 +160,8 @@
           <div>
         <h2 id="voice-heading">🔊 Genel ses odası</h2>
         <p class="room-hint">Bir ses odası seç; yalnızca o odadaki kişiler burada görünür.</p>
-        <p class="online-title">🟢 Çevrimiçi arkadaşlar</p>
-        <div id="online-users" class="online-grid"><div class="empty">Giriş yapanlar burada görünür.</div></div>
+        <p class="online-title">Sunucu üyeleri</p>
+        <div id="online-users" class="online-grid"><div class="empty">Üye listesi yükleniyor…</div></div>
         <div class="voice-controls">
           <button id="join-btn">Odaya katıl</button>
           <button id="mute-btn" class="muted-btn" disabled>🎙 Mikrofon kapalı</button>
@@ -358,7 +359,7 @@ function uniquePresencePeople(channel){
   return [...people.values()];
 }
 
-// Siteye giriş yapan herkes yalnızca ortadaki "Çevrimiçi arkadaşlar" alanında görünür.
+// Presence yalnızca kayıtlı üye kartlarının çevrimiçi durumunu belirler.
 let roomRosterTimer=null;
 let roomRosterQueued=null;
 let roomRosterRevision=0;
@@ -410,22 +411,69 @@ async function startOnlinePresence(){
   onlineChannel=db.channel("site-online-presence",{config:{presence:{key:currentUser.id}}});
   onlineChannel.on("presence",{event:"sync"},renderOnlineUsers);
   onlineChannel.on("broadcast",{event:"room-roster-changed"},queueRoomRosterRefresh);
+  onlineChannel.on("broadcast",{event:"registered-members-changed"},()=>void refreshRegisteredMembers());
   await subscribeAndWait(onlineChannel,"Çevrimiçi listesi");
   await onlineChannel.track({user_id:currentUser.id,username:currentUsername});
   renderOnlineUsers();
+  if(accountType==="registered") announceRegisteredMembersChanged();
 }
+let registeredMembers=null;
+let registeredMembersTimer=null;
+let registeredMembersRequest=0;
+
+async function refreshRegisteredMembers(){
+  const user=currentUser;
+  if(!user) return;
+  const request=++registeredMembersRequest;
+  try{
+    const {data:{session}}=await db.auth.getSession();
+    if(!session?.access_token || currentUser!==user) return;
+    const response=await fetch("/api/registered-members",{
+      method:"POST",cache:"no-store",signal:AbortSignal.timeout(9000),
+      headers:{Authorization:"Bearer "+session.access_token}
+    });
+    if(!response.ok) return;
+    const {members}=await response.json();
+    if(currentUser!==user || request!==registeredMembersRequest || !Array.isArray(members)) return;
+    registeredMembers=members;
+    renderOnlineUsers();
+  }catch{
+    // A temporary error keeps the previous list visible.
+  }
+}
+
+function announceRegisteredMembersChanged(){
+  void refreshRegisteredMembers();
+  if(onlineChannel) void onlineChannel.send({type:"broadcast",event:"registered-members-changed",payload:{}}).catch(console.warn);
+}
+
 function renderOnlineUsers(){
-  const box=$("online-users"); if(!box) return;
+  const box=$("online-users");
+  if(!box || registeredMembers===null) return;
+  const online=new Set(uniquePresencePeople(onlineChannel).map(person=>person.user_id));
   box.replaceChildren();
-  const people=uniquePresencePeople(onlineChannel);
-  if(!people.length){box.innerHTML='<div class="empty">Şu anda çevrimiçi kimse yok.</div>';return;}
-  people.sort((a,b)=>(a.username||"").localeCompare(b.username||"","tr"));
+  if(!registeredMembers.length){
+    box.innerHTML='<div class="empty">Henüz kayıtlı üye yok.</div>';
+    return;
+  }
+  const people=[...registeredMembers].sort((a,b)=>a.username.localeCompare(b.username,"tr"));
   for(const person of people){
-    const item=document.createElement("div"); item.className="online-person";
-    const avatar=document.createElement("div"); avatar.className="avatar"; avatar.textContent=initials(person.username);
-    const name=document.createElement("span"); name.className="online-name"; name.textContent=person.username||"Misafir";
-    const dot=document.createElement("i"); dot.className="online-dot";
-    item.append(avatar,name,dot); box.append(item);
+    const item=document.createElement("div");
+    item.className="online-person";
+    const status=online.has(person.user_id)?"Çevrimiçi":"Çevrimdışı";
+    item.title=person.username+" · "+status;
+    item.setAttribute("aria-label",item.title);
+    const avatar=document.createElement("div");
+    avatar.className="avatar";
+    avatar.textContent=initials(person.username);
+    const name=document.createElement("span");
+    name.className="online-name";
+    name.textContent=person.username;
+    const dot=document.createElement("i");
+    dot.className="online-dot"+(online.has(person.user_id)?"":" offline");
+    dot.setAttribute("aria-hidden","true");
+    item.append(avatar,name,dot);
+    box.append(item);
   }
 }
 
@@ -862,7 +910,7 @@ function renderOwnerPanel(){
         del.disabled=true;
         try{
           const r=await moderationRequest({action:"delete_account",targetUserId:account.user_id,confirmUsername:typed});
-          toast(r.message||"Hesap silindi");await refreshModerationStatus();
+          toast(r.message||"Hesap silindi");announceRegisteredMembersChanged();await refreshModerationStatus();
         }catch(error){toast(error.message);del.disabled=false;}
       });
       row.append(del);
@@ -1039,6 +1087,9 @@ async function startAuthenticatedApp(user,name,type){
   accountType=type;
   localStorage.setItem("salim_guest_name",name);
   showApp();
+  void refreshRegisteredMembers();
+  clearInterval(registeredMembersTimer);
+  registeredMembersTimer=setInterval(refreshRegisteredMembers,30000);
   queueRoomRosterRefresh();
   clearInterval(roomRosterTimer);
   roomRosterTimer=setInterval(queueRoomRosterRefresh,12000);
@@ -2018,6 +2069,7 @@ async function subscribeMessages(){
     .subscribe(status=>{if(status==="SUBSCRIBED") queueModerationRefresh();});
 }
 async function logout(){
+  clearInterval(registeredMembersTimer);
   clearInterval(roomRosterTimer);
   clearTimeout(roomRosterQueued);
   clearRoomMutes();
@@ -2040,6 +2092,7 @@ $("refresh-app-btn").addEventListener("click",()=>{
 });
 window.addEventListener("focus",queueModerationRefresh);
 window.addEventListener("focus",queueRoomRosterRefresh);
+window.addEventListener("focus",()=>void refreshRegisteredMembers());
 document.addEventListener("pointerdown",unlockNotificationAudio,{passive:true});
 document.addEventListener("keydown",unlockNotificationAudio);
 document.querySelectorAll("[data-auth]").forEach(button=>button.addEventListener("click",()=>setAuthMode(button.dataset.auth)));
