@@ -25,6 +25,9 @@
     .genel-room-photo{display:none;width:clamp(105px,18vw,166px);height:auto;max-width:100%;border-radius:10px;justify-self:end}
     .app:has([data-room="genel"].active) .genel-room-photo{display:block}
     @media(max-width:560px){.app:has([data-room="genel"].active) .voice-room-layout{grid-template-columns:minmax(0,1fr)}.genel-room-photo{justify-self:start;width:105px}}
+    .room-link-label{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:700}
+    .room-link-count{font-variant-numeric:tabular-nums;color:#badaff}
+    .room-link-names{display:block;text-align:left;margin-top:4px;font-size:11px;font-weight:normal;color:#aabbd1;overflow-wrap:anywhere}
     .room-link{padding:10px 12px;background:var(--panel2);border-radius:9px;margin:5px 0 7px;cursor:pointer;border:1px solid transparent;color:#dce8f8}.room-link.active{border-color:#6598ee;background:#203b61}.room-list{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}.room-link:hover{filter:brightness(1.15)}
     hr{border:0;border-top:1px solid #d6deeb;margin:0 0 17px}
     .side-heading{font-size:15px;margin:0 0 10px}
@@ -130,9 +133,9 @@
       <p class="server-label">1+1</p>
       <div class="side-heading">Sesli odalar</div>
       <div class="room-list" id="room-list">
-        <button class="room-link active" data-room="genel">🎙️ Genel</button>
-        <button class="room-link" data-room="oyun">🎮 Oyun</button>
-        <button class="room-link" data-room="muhabbet">☕ Muhabbet</button>
+        <button class="room-link active" data-room="genel"><span class="room-link-label"><span>🎙️ Genel</span><span class="room-link-count">—</span></span><span class="room-link-names">Liste yükleniyor…</span></button>
+        <button class="room-link" data-room="oyun"><span class="room-link-label"><span>🎮 Oyun</span><span class="room-link-count">—</span></span><span class="room-link-names">Liste yükleniyor…</span></button>
+        <button class="room-link" data-room="muhabbet"><span class="room-link-label"><span>☕ Muhabbet</span><span class="room-link-count">—</span></span><span class="room-link-names">Liste yükleniyor…</span></button>
       </div>
       <hr>
       <h3 class="side-heading"> <span id="selected-room-label">Genel</span> — Odadakiler <span id="voice-count" style="color:#9aabc2;font-weight:normal">(0)</span></h3>
@@ -356,11 +359,57 @@ function uniquePresencePeople(channel){
 }
 
 // Siteye giriş yapan herkes yalnızca ortadaki "Çevrimiçi arkadaşlar" alanında görünür.
+let roomRosterTimer=null;
+let roomRosterQueued=null;
+let roomRosterRevision=0;
+
+function renderRoomRoster(rooms){
+  for(const button of document.querySelectorAll("[data-room]")){
+    const people=rooms[button.dataset.room];
+    if(!Array.isArray(people)) continue;
+    button.querySelector(".room-link-count").textContent=people.length+" kişi";
+    button.querySelector(".room-link-names").textContent=people.length ? people.join(", ") : "Boş";
+  }
+}
+
+async function refreshRoomRoster(){
+  const user=currentUser;
+  if(!user) return;
+  const revision=++roomRosterRevision;
+  try{
+    const {data:{session}}=await db.auth.getSession();
+    if(!session?.access_token || currentUser!==user) return;
+    const response=await fetch("/api/room-roster",{
+      method:"POST",cache:"no-store",signal:AbortSignal.timeout(9000),
+      headers:{Authorization:"Bearer "+session.access_token}
+    });
+    if(!response.ok) return;
+    const result=await response.json();
+    if(currentUser===user && revision===roomRosterRevision) renderRoomRoster(result.rooms);
+  }catch{
+    // Retry on the next refresh or room change.
+  }
+}
+
+function queueRoomRosterRefresh(){
+  if(!currentUser || roomRosterQueued!==null) return;
+  roomRosterQueued=setTimeout(()=>{
+    roomRosterQueued=null;
+    void refreshRoomRoster();
+  },300);
+}
+
+function announceRoomRosterChange(){
+  queueRoomRosterRefresh();
+  if(onlineChannel) void onlineChannel.send({type:"broadcast",event:"room-roster-changed",payload:{}}).catch(console.warn);
+}
+
 async function startOnlinePresence(){
   if(!currentUser) return;
   if(onlineChannel) await db.removeChannel(onlineChannel);
   onlineChannel=db.channel("site-online-presence",{config:{presence:{key:currentUser.id}}});
   onlineChannel.on("presence",{event:"sync"},renderOnlineUsers);
+  onlineChannel.on("broadcast",{event:"room-roster-changed"},queueRoomRosterRefresh);
   await subscribeAndWait(onlineChannel,"Çevrimiçi listesi");
   await onlineChannel.track({user_id:currentUser.id,username:currentUsername});
   renderOnlineUsers();
@@ -990,6 +1039,9 @@ async function startAuthenticatedApp(user,name,type){
   accountType=type;
   localStorage.setItem("salim_guest_name",name);
   showApp();
+  queueRoomRosterRefresh();
+  clearInterval(roomRosterTimer);
+  roomRosterTimer=setInterval(queueRoomRosterRefresh,12000);
   await startOnlinePresence();
   await subscribeVoicePresence();
   await loadMessages();
@@ -1612,6 +1664,7 @@ function resetVoiceUi(message,room){
   removeRemoteAudio();
   renderVoiceButtons();
   setText("voice-status",message);
+  announceRoomRosterChange();
   void publishVoiceState(false);
   renderSidebarVoiceUsers();
 }
@@ -1663,6 +1716,7 @@ async function joinVoice(){
         void publishVoiceState(false); // Eski odadan ayrıldığını bildir.
         releasePushTalk();
         selectedRoom=newRoom;
+        announceRoomRosterChange();
         resetScreenSharing(room);
         if(timedMuteActive) scheduleTimedMuteCheck(room,0);
         renderVoiceButtons();
@@ -1772,6 +1826,7 @@ async function joinVoice(){
     void publishVoiceState(true);
     playNotificationSound("join");
     toast("Sesli odaya katıldın!");
+    announceRoomRosterChange();
     void refreshAudioDevices();
   }catch(error){
     console.error("Ses odasına giriş hatası:",error);
@@ -1895,6 +1950,7 @@ async function leaveVoice(){
     renderSidebarVoiceUsers();
     playNotificationSound("leave");
     toast("Sesli odadan ayrıldın.");
+    announceRoomRosterChange();
   }
 }
 
@@ -1962,6 +2018,8 @@ async function subscribeMessages(){
     .subscribe(status=>{if(status==="SUBSCRIBED") queueModerationRefresh();});
 }
 async function logout(){
+  clearInterval(roomRosterTimer);
+  clearTimeout(roomRosterQueued);
   clearRoomMutes();
   clearInterval(moderationFallbackTimer);
   clearTimeout(moderationRefreshTimer);
@@ -1981,6 +2039,7 @@ $("refresh-app-btn").addEventListener("click",()=>{
   window.location.replace(url.href);
 });
 window.addEventListener("focus",queueModerationRefresh);
+window.addEventListener("focus",queueRoomRosterRefresh);
 document.addEventListener("pointerdown",unlockNotificationAudio,{passive:true});
 document.addEventListener("keydown",unlockNotificationAudio);
 document.querySelectorAll("[data-auth]").forEach(button=>button.addEventListener("click",()=>setAuthMode(button.dataset.auth)));
