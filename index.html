@@ -162,11 +162,10 @@
         <div class="voice-room-layout">
           <div>
         <h2 id="voice-heading">🔊 Genel ses odası</h2>
-        <p class="room-hint">Bir ses odası seç; yalnızca o odadaki kişiler burada görünür.</p>
+        <p class="room-hint">Katılmak veya oda değiştirmek için sol menüden oda adına tıkla.</p>
         <p class="online-title">Sunucu üyeleri</p>
         <div id="online-users" class="online-grid"><div class="empty">Üye listesi yükleniyor…</div></div>
         <div class="voice-controls">
-          <button id="join-btn">Odaya katıl</button>
           <button id="mute-btn" class="muted-btn" disabled>🎙 Mikrofon kapalı</button>
           <button id="leave-btn" class="danger" disabled>Odadan ayrıl</button>
         </div>
@@ -301,6 +300,7 @@ let muteChanging = false;
 let joiningVoice = false;
 let leavingVoice = false;
 let roomChanging = false;
+let switchingVoiceRoom = false;
 let voiceMembers = new Map();
 let voiceLastEvents = new Map();
 let voiceEventSequence = 0;
@@ -590,11 +590,28 @@ async function selectRoom(roomName){
   document.querySelectorAll("[data-room]").forEach(button=>button.classList.toggle("active",button.dataset.room===roomName));
   try{
     await subscribeVoicePresence(roomName);
-    setText("voice-status",labels[roomName]+" odası seçildi. Katılmaya hazırsın.");
+    setText("voice-status",labels[roomName]+" odasına bağlanılıyor…");
   }catch(error){
     console.error("Oda listesi bağlanamadı:",error);
     toast("Oda listesine bağlanılamadı. Sayfayı yenileyebilirsin.");
   }finally{roomChanging=false;}
+}
+
+async function enterVoiceRoom(roomName){
+  if(!currentUser || !Object.hasOwn(MOD_ROOMS,roomName) || switchingVoiceRoom ||
+      joiningVoice || leavingVoice || muteChanging || roomChanging) return;
+  if(livekitRoom && selectedRoom===roomName) return;
+  switchingVoiceRoom=true;
+  renderVoiceButtons();
+  try{
+    if(livekitRoom) await leaveVoice();
+    if(livekitRoom || !currentUser) return;
+    await selectRoom(roomName);
+    if(selectedRoom===roomName) await joinVoice();
+  }finally{
+    switchingVoiceRoom=false;
+    renderVoiceButtons();
+  }
 }
 
 async function subscribeAndWait(channel,label){
@@ -1770,14 +1787,18 @@ function renderVoiceButtons(){
   $("music-url").disabled=!musicConnected || musicCommandPending;
   $("music-play").disabled=!musicConnected || musicCommandPending;
   $("music-stop").disabled=!musicConnected || musicCommandPending || !musicSession;
-  $("join-btn").disabled=connected || joiningVoice || leavingVoice || roomChanging;
+  const transition=switchingVoiceRoom || joiningVoice || leavingVoice || roomChanging;
+  for(const button of document.querySelectorAll("[data-room]")){
+    button.disabled=transition || muteChanging;
+    button.setAttribute("aria-pressed",String(connected && button.dataset.room===selectedRoom));
+  }
   $("mute-btn").disabled=!connected || timedMuteActive || pttEnabled || muteChanging || joiningVoice || leavingVoice;
   $("ptt-enabled").checked=pttEnabled;
   $("ptt-enabled").disabled=muteChanging || joiningVoice || leavingVoice;
   $("ptt-bind").hidden=!pttEnabled;
   $("ptt-bind").textContent=pttBinding ? "Bir tuşa bas…" : "Tuş: "+pttLabel;
   renderMusicQueue();
-  $("leave-btn").disabled=!connected || muteChanging || joiningVoice || leavingVoice;
+  $("leave-btn").disabled=!connected || muteChanging || transition;
   $("mute-btn").innerHTML=connected && pttEnabled ? (muted ? "🎙 Bas-konuş bekliyor" : "🎙 Konuşuyorsun")
     : connected && muted
     ? mutedMicIconSvg()+" Mikrofonu aç"
@@ -2241,12 +2262,11 @@ navigator.mediaDevices?.addEventListener?.("devicechange",()=>void refreshAudioD
 renderAudioDeviceOptions();
 renderVoiceButtons();
 $("music-stop").addEventListener("click",()=>void sendMusicCommand("stop"));
-$("join-btn").addEventListener("click",joinVoice);
 $("mute-btn").addEventListener("click",toggleMute);
 $("leave-btn").addEventListener("click",leaveVoice);
 $("logout-btn").addEventListener("click",logout);
 $("clear-chat-btn").addEventListener("click",clearChatAsModerator);
-document.querySelectorAll("[data-room]").forEach(button=>button.addEventListener("click",()=>selectRoom(button.dataset.room)));
+document.querySelectorAll("[data-room]").forEach(button=>button.addEventListener("click",()=>void enterVoiceRoom(button.dataset.room)));
 
 // Sekme kapanırken Presence bağlantısı kesilir; Supabase Presence de bağlantı kaybını temizler.
 window.addEventListener("pagehide",()=>{
