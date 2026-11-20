@@ -14,6 +14,7 @@ export async function onRequestGet({request,env}){
     });
     if(!auth.ok) return json({error:"Oturum geçersiz",code:"NO_SESSION"},401);
     const user=await auth.json();
+    if(user?.is_anonymous===true) return json({error:"Kayıtlı hesap gerekli",code:"NO_SESSION"},401);
     if(!user?.id) return json({error:"Oturum geçersiz",code:"NO_SESSION"},401);
     const res=await fetch(SUPABASE_URL+"/rest/v1/server_bans?select=status&user_id=eq."+encodeURIComponent(user.id)+"&limit=1",{
       headers:{apikey:secret}

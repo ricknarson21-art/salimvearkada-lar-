@@ -108,7 +108,7 @@
     .auth-tabs button.active{background:var(--blue)}
     .auth-pane{display:none}.auth-pane.active{display:block}
     .auth-pane input{margin:5px 0 10px}
-    .turnstile-holder{display:none;justify-content:center;min-height:65px;margin:12px 0}
+    .turnstile-holder{display:flex;justify-content:center;min-height:65px;margin:12px 0}
     .auth-error{color:#fda4af;font-size:13px;min-height:18px}
     #music-queue{padding-left:24px;max-height:180px;overflow:auto}
     #music-queue a{color:#a9c8ff}
@@ -150,7 +150,7 @@
         <div id="owner-admin-list"></div>
       </section>
       <div class="side-bottom">
-        <div class="me"><div class="avatar" id="my-avatar">?</div><div class="me-info"><strong id="my-name">Misafir</strong><small>Misafir hesabı</small></div><button class="muted-btn" id="logout-btn" title="Çıkış yap">↪</button></div>
+        <div class="me"><div class="avatar" id="my-avatar">?</div><div class="me-info"><strong id="my-name"></strong><small>Kayıtlı hesap</small></div><button class="muted-btn" id="logout-btn" title="Çıkış yap">↪</button></div>
       </div>
     </aside>
     <main class="main">
@@ -222,22 +222,16 @@
     </main>
   </div>
 
-  <div class="login" id="guest-login">
+  <div class="login" id="account-login">
     <div class="login-box">
       <div style="font-size:38px">🎧</div>
       <h1>Bir Artı Bir</h1>
       <p>Özel arkadaş sunucumuza hoş geldin!</p>
       <div class="auth-tabs">
-        <button type="button" class="active" data-auth="guest">Misafir</button>
-        <button type="button" data-auth="registered">Giriş Yap</button>
+        <button type="button" class="active" data-auth="registered">Giriş Yap</button>
         <button type="button" data-auth="register">Kayıt Ol</button>
       </div>
-      <div class="auth-pane active" id="pane-guest">
-        <input id="guest-name" maxlength="20" placeholder="Kullanıcı adını yaz…" autocomplete="nickname">
-        <button type="button" id="login-btn">Misafir olarak giriş yap</button>
-        <p class="login-note">Şifre gerekmez ❤️</p>
-      </div>
-      <div class="auth-pane" id="pane-registered">
+      <div class="auth-pane active" id="pane-registered">
         <input id="registered-name" maxlength="20" placeholder="Kullanıcı adı" autocomplete="username">
         <input id="registered-password" type="password" placeholder="Şifre" autocomplete="current-password">
         <button type="button" id="registered-login-btn">Giriş yap</button>
@@ -264,11 +258,9 @@ const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 let currentUser = null;
 let currentUsername = null;
-let accountType = "guest";
 let moderationRole = "member";
 let moderationAccounts = [];
 const MOD_ROOMS = {genel:"Genel",oyun:"Oyun",muhabbet:"Muhabbet"};
-let authMode = "guest";
 let turnstileWidgetId = null;
 const TURNSTILE_SITE_KEY = "0x4AAAAAAGGKEwfNQTK39Muf";
 let notificationAudioContext = null;
@@ -343,11 +335,11 @@ function toast(message){
 }
 function setText(id,value){$(id).textContent=value ?? "";}
 function showApp(){
-  $("guest-login").style.display="none";
+  $("account-login").style.display="none";
   $("app").setAttribute("aria-hidden","false");
   setText("my-name",currentUsername);
   document.querySelector(".me-info small").textContent =
-    accountType === "registered" ? "Kayıtlı hesap" : "Misafir hesabı";
+    "Kayıtlı hesap";
   setText("my-avatar",initials(currentUsername));
   setText("connection-state","Bağlandı");
 }
@@ -418,7 +410,7 @@ async function startOnlinePresence(){
   await subscribeAndWait(onlineChannel,"Çevrimiçi listesi");
   await onlineChannel.track({user_id:currentUser.id,username:currentUsername});
   renderOnlineUsers();
-  if(accountType==="registered") announceRegisteredMembersChanged();
+  announceRegisteredMembersChanged();
 }
 let registeredMembers=null;
 let registeredMembersTimer=null;
@@ -871,7 +863,7 @@ function renderOwnerPanel(){
   renderMusicQueue();
   $("clear-chat-btn").style.display=moderationRole==="owner"||moderationRole==="admin"?"inline-block":"none";
   const label=document.querySelector(".me-info small");
-  if(label) label.textContent=(accountType==="registered"?"Kayıtlı hesap":"Misafir hesabı")+
+  if(label) label.textContent=("Kayıtlı hesap")+
     (moderationRole==="owner"?" • 👑 Kurucu":moderationRole==="admin"?" • 🛡️ Admin":"");
   const box=$("owner-admin-list");box.replaceChildren();
   if(moderationRole!=="owner") return;
@@ -1095,10 +1087,9 @@ async function clearChatAsModerator(){
   finally{button.disabled=false;}
 }
 
-// Misafir, kayıtlı giriş ve kayıt aynı ana sayfada bulunur.
+// Kayıt ve hesap girişi aynı giriş ekranında bulunur.
 function setAuthMode(mode){
-  if(!["guest","registered","register"].includes(mode)) return;
-  authMode=mode;
+  if(!["registered","register"].includes(mode)) return;
   document.querySelectorAll("[data-auth]").forEach(button=>{
     button.classList.toggle("active",button.dataset.auth===mode);
   });
@@ -1106,11 +1097,11 @@ function setAuthMode(mode){
     pane.classList.toggle("active",pane.id==="pane-"+mode);
   });
   $("auth-error").textContent="";
-  $("auth-turnstile").style.display=mode==="guest"?"none":"flex";
-  if(mode!=="guest") renderAuthTurnstile();
+  $("auth-turnstile").style.display="flex";
+  renderAuthTurnstile();
 }
 function renderAuthTurnstile(){
-  if(turnstileWidgetId!==null || !window.turnstile || authMode==="guest") return;
+  if(turnstileWidgetId!==null || !window.turnstile) return;
   try{
     turnstileWidgetId=window.turnstile.render("#auth-turnstile",{
       sitekey:TURNSTILE_SITE_KEY,theme:"dark"
@@ -1165,7 +1156,7 @@ async function removeBlockedSession(message){
 function startAccessPolling(){
   if(accessPollTimer!==null)clearInterval(accessPollTimer);
   accessPollTimer=setInterval(async()=>{
-    if(accessPollBusy||accessBlocking||!currentUser||accountType!=="registered")return;
+    if(accessPollBusy||accessBlocking||!currentUser)return;
     accessPollBusy=true;
     try{
       const result=await checkServerAccess();
@@ -1176,19 +1167,15 @@ function startAccessPolling(){
     finally{accessPollBusy=false;}
   },20000);
 }
-async function startAuthenticatedApp(user,name,type){
-  if(type==="registered"){
-    const access=await checkServerAccess();
-    if(!access.allowed){
-      await db.auth.signOut({scope:"local"}).catch(()=>{});
-      throw new Error(access.code==="ACCOUNT_BANNED"
-        ?"Bu hesap sunucudan banlandı.":"Bu hesap silinmiş veya oturumu geçersiz.");
-    }
+async function startAuthenticatedApp(user,name){
+  const access=await checkServerAccess();
+  if(!access.allowed){
+    await db.auth.signOut({scope:"local"}).catch(()=>{});
+    throw new Error(access.code==="ACCOUNT_BANNED"
+      ?"Bu hesap sunucudan banlandı.":"Bu hesap silinmiş veya oturumu geçersiz.");
   }
   currentUser=user;
   currentUsername=name;
-  accountType=type;
-  localStorage.setItem("salim_guest_name",name);
   showApp();
   void refreshRegisteredMembers();
   clearInterval(registeredMembersTimer);
@@ -1203,35 +1190,7 @@ async function startAuthenticatedApp(user,name,type){
   void refreshModerationStatus();
   clearInterval(moderationFallbackTimer);
   moderationFallbackTimer=setInterval(queueModerationRefresh,20000);
-  if(type==="registered")startAccessPolling();
-}
-async function login(){
-  const name=$("guest-name").value.trim();
-  if(name.length<2 || name.length>20){toast("Kullanıcı adı 2–20 karakter olmalı.");return;}
-  const btn=$("login-btn");btn.disabled=true;btn.textContent="Giriş yapılıyor…";
-  try{
-    let {data:{session},error:sessionError}=await db.auth.getSession();
-    if(sessionError) throw sessionError;
-    // Kayıtlı hesabın oturumu üzerinde misafir profili oluşturma.
-    if(session?.user && session.user.is_anonymous!==true){
-      const {error}=await db.auth.signOut();
-      if(error) throw error;
-      session=null;
-    }
-    let user=session?.user;
-    if(!user){
-      const result=await db.auth.signInAnonymously();
-      if(result.error) throw result.error;
-      user=result.data.user;
-    }
-    const {error:profileError}=await db.from("profiles").upsert(
-      {user_id:user.id,username:name},{onConflict:"user_id"}
-    );
-    if(profileError) throw profileError;
-    await startAuthenticatedApp(user,name,"guest");
-    toast("Hoş geldin, "+name+"!");
-  }catch(error){console.error(error);toast("Giriş hatası: "+error.message);}
-  finally{btn.disabled=false;btn.textContent="Misafir olarak giriş yap";}
+  startAccessPolling();
 }
 async function registerAccount(){
   const username=$("register-name").value.trim();
@@ -1268,7 +1227,7 @@ async function loginAccount(){
       console.warn("Kayıtlı kullanıcı profili güncellenemedi:",profileError);
       toast("Hesap açıldı ancak profil eşitlemesi başarısız.");
     }
-    await startAuthenticatedApp(data.user,username,"registered");
+    await startAuthenticatedApp(data.user,username);
     toast("Hoş geldin, "+username+"!");
   }catch(error){console.error("Hesap girişi hatası:",error);$("auth-error").textContent=error.message;}
   finally{btn.disabled=false;$("registered-password").value="";resetCaptcha();}
@@ -1277,17 +1236,21 @@ async function restoreSession(){
   try{
     const {data:{session},error}=await db.auth.getSession();
     if(error || !session) return;
+    if(session.user.is_anonymous===true){
+      await db.auth.signOut({scope:"local"});
+      $("auth-error").textContent="Misafir girişi kaldırıldı. Giriş yap veya kayıt ol.";
+      return;
+    }
     const user=session.user;
     const {data:profile,error:profileError}=await db.from("profiles")
       .select("username").eq("user_id",user.id).maybeSingle();
-    const registered=user.is_anonymous!==true;
     const internalEmail=typeof user.email==="string"?user.email.toLowerCase():"";
-    const fallback=registered && internalEmail.endsWith("@accounts.birartibir.online")
+    const fallback=internalEmail.endsWith("@accounts.birartibir.online")
       ? internalEmail.slice(0,-"@accounts.birartibir.online".length):"";
     const username=profile?.username || fallback;
     if(profileError && !fallback) {console.warn("Profil okunamadı:",profileError);return;}
     if(!username) return;
-    await startAuthenticatedApp(user,username,registered?"registered":"guest");
+    await startAuthenticatedApp(user,username);
   }catch(error){console.error("Oturum geri yüklenemedi:",error);}
 }
 
@@ -2207,8 +2170,6 @@ $("register-btn").addEventListener("click",registerAccount);
 $("registered-login-btn").addEventListener("click",loginAccount);
 $("registered-password").addEventListener("keydown",event=>{if(event.key==="Enter")loginAccount();});
 $("register-password").addEventListener("keydown",event=>{if(event.key==="Enter")registerAccount();});
-$("login-btn").addEventListener("click",login);
-$("guest-name").addEventListener("keydown",event=>{if(event.key==="Enter") login();});
 $("send-btn").addEventListener("click",sendMessage);
 $("msg").addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();sendMessage();}});
 $("start-screen-share").addEventListener("click",()=>void startScreenCapture());

@@ -7,7 +7,7 @@
   <title>salimvearkadaşları</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onBirArtibirTurnstileReady" defer></script>
   <style>
     :root{color-scheme:dark;--bg:#0b1220;--side:#111d30;--panel:#152238;--panel2:#1b2b43;--panel3:#20334f;--line:#263852;--text:#e5edf8;--muted:#9aabc2;--blue:#2563eb;--green:#34d399;--red:#dc4659}
     *{box-sizing:border-box}
@@ -93,7 +93,7 @@
       <h3 class="side-heading"> <span id="selected-room-label">Genel</span> — Odadakiler <span id="voice-count" style="color:#9aabc2;font-weight:normal">(0)</span></h3>
       <div id="sidebar-voice-users"><div class="empty">Henüz kimse katılmadı.</div></div>
       <div class="side-bottom">
-        <div class="me"><div class="avatar" id="my-avatar">?</div><div class="me-info"><strong id="my-name">Misafir</strong><small>Misafir hesabı</small></div><button class="muted-btn" id="logout-btn" title="Çıkış yap">↪</button></div>
+        <div class="me"><div class="avatar" id="my-avatar">?</div><div class="me-info"><strong id="my-name"></strong><small>Kayıtlı hesap</small></div><button class="muted-btn" id="logout-btn" title="Çıkış yap">↪</button></div>
       </div>
     </aside>
     <main class="main">
@@ -118,22 +118,16 @@
     </main>
   </div>
 
-  <div class="login" id="guest-login">
+  <div class="login" id="account-login">
     <div class="login-box">
       <div style="font-size:38px">🎧</div>
       <h1>salimvearkadaşları</h1>
       <p>Özel arkadaş sunucumuza hoş geldin!</p>
       <div class="auth-tabs">
-        <button type="button" class="active" data-auth="guest">Misafir</button>
-        <button type="button" data-auth="registered">Giriş Yap</button>
+        <button type="button" class="active" data-auth="registered">Giriş Yap</button>
         <button type="button" data-auth="register">Kayıt Ol</button>
       </div>
-      <div class="auth-pane active" id="pane-guest">
-        <input id="guest-name" maxlength="20" placeholder="Misafir kullanıcı adı" autocomplete="nickname">
-        <button id="login-btn">Misafir olarak giriş yap</button>
-        <p class="login-note">Şifre gerekmez ❤️</p>
-      </div>
-      <div class="auth-pane" id="pane-registered">
+      <div class="auth-pane active" id="pane-registered">
         <input id="registered-name" maxlength="20" placeholder="Kullanıcı adı" autocomplete="username">
         <input id="registered-password" type="password" placeholder="Şifre" autocomplete="current-password">
         <button id="registered-login-btn">Giriş yap</button>
@@ -143,7 +137,7 @@
         <input id="register-password" type="password" minlength="6" placeholder="Şifre (en az 6 karakter)" autocomplete="new-password">
         <button id="register-btn">Hesap oluştur</button>
       </div>
-      <div id="auth-turnstile" class="turnstile-holder" style="display:none"></div>
+      <div id="auth-turnstile" class="turnstile-holder"></div>
       <p id="auth-error" class="auth-error" role="alert"></p>
     </div>
   </div>
@@ -167,9 +161,7 @@ let muted = false;
 let leavingVoice = false;
 let selectedRoom = "genel";
 let activeSpeakerIds = new Set();
-let accountType = "guest";
 let turnstileWidgetId = null;
-let authMode = "guest";
 
 const $ = id => document.getElementById(id);
 function initials(name){return (name || "?").trim().slice(0,1).toLocaleUpperCase("tr-TR");}
@@ -179,11 +171,11 @@ function toast(message){
 }
 function setText(id,value){$(id).textContent=value ?? "";}
 function showApp(){
-  $("guest-login").style.display="none";
+  $("account-login").style.display="none";
   $("app").setAttribute("aria-hidden","false");
   setText("my-name",currentUsername);
   setText("my-avatar",initials(currentUsername));
-  document.querySelector(".me-info small").textContent=accountType==="registered"?"Kayıtlı hesap":"Misafir hesabı";
+  document.querySelector(".me-info small").textContent="Kayıtlı hesap";
   setText("connection-state","Bağlandı");
 }
 function uniquePresencePeople(channel){
@@ -264,46 +256,18 @@ async function subscribeAndWait(channel,label){
     });
   });
 }
-async function login(){
-  const name=$("guest-name").value.trim();
-  if(name.length<2 || name.length>20){toast("Kullanıcı adı 2–20 karakter olmalı.");return;}
-  const btn=$("login-btn"); btn.disabled=true; btn.textContent="Giriş yapılıyor…";
-  try{
-    const {data:{session},error:sessionError}=await db.auth.getSession();
-    if(sessionError) throw sessionError;
-    if(session?.user && !session.user.is_anonymous) await db.auth.signOut();
-    let user=(await db.auth.getSession()).data.session?.user;
-    if(!user){
-      const result=await db.auth.signInAnonymously();
-      if(result.error) throw result.error;
-      user=result.data.user;
-    }
-    const {error:profileError}=await db.from("profiles").upsert(
-      {user_id:user.id,username:name},{onConflict:"user_id"}
-    );
-    if(profileError) throw profileError;
-    currentUser=user; currentUsername=name; accountType="guest";
-    localStorage.setItem("salim_guest_name",name);
-    showApp();
-    await startOnlinePresence();
-    await subscribeVoicePresence();
-    await loadMessages();
-    await subscribeMessages();
-    toast("Hoş geldin, "+name+"!");
-  }catch(error){
-    console.error(error); toast("Giriş hatası: "+error.message);
-  }finally{
-    btn.disabled=false; btn.textContent="Misafir olarak giriş yap";
-  }
-}
 async function restoreSession(){
   try{
     const {data:{session},error}=await db.auth.getSession();
     if(error || !session) return;
+    if(session.user.is_anonymous===true){
+      await db.auth.signOut({scope:"local"});
+      $("auth-error").textContent="Misafir girişi kaldırıldı. Giriş yap veya kayıt ol.";
+      return;
+    }
     const {data:profile,error:profileError}=await db.from("profiles").select("username").eq("user_id",session.user.id).maybeSingle();
     if(profileError || !profile?.username) return;
-    currentUser=session.user; currentUsername=profile.username; accountType=session.user.is_anonymous?"guest":"registered";
-    localStorage.setItem("salim_guest_name",currentUsername);
+    currentUser=session.user; currentUsername=profile.username;
     showApp();
     await startOnlinePresence();
     await subscribeVoicePresence();
@@ -460,17 +424,17 @@ async function logout(){
 // Hesap işlemleri sadece kullanıcı etkileşimiyle başlatılır.
 const TURNSTILE_SITE_KEY="0x4AAAAAAGGKEwfNQTK39Muf";
 function setAuthMode(mode){
-  authMode=mode;
   document.querySelectorAll("[data-auth]").forEach(b=>b.classList.toggle("active",b.dataset.auth===mode));
   document.querySelectorAll(".auth-pane").forEach(p=>p.classList.toggle("active",p.id==="pane-"+mode));
   $("auth-error").textContent="";
-  $("auth-turnstile").style.display=mode==="guest"?"none":"flex";
-  if(mode!=="guest") initTurnstile();
+  $("auth-turnstile").style.display="flex";
+  initTurnstile();
 }
 function initTurnstile(){
   if(turnstileWidgetId!==null || !window.turnstile) return;
   turnstileWidgetId=window.turnstile.render("#auth-turnstile",{sitekey:TURNSTILE_SITE_KEY,theme:"dark"});
 }
+window.onBirArtibirTurnstileReady=initTurnstile;
 function getCaptcha(){return turnstileWidgetId===null?null:window.turnstile?.getResponse(turnstileWidgetId);}
 function resetCaptcha(){if(turnstileWidgetId!==null) window.turnstile?.reset(turnstileWidgetId);}
 async function accountRequest(path,username,password){
@@ -504,7 +468,7 @@ async function loginAccount(){
     if(error||!data.user) throw error||new Error("Oturum açılamadı.");
     const {error:profileError}=await db.from("profiles").upsert({user_id:data.user.id,username},{onConflict:"user_id"});
     if(profileError) throw profileError;
-    currentUser=data.user;currentUsername=username;accountType="registered";
+    currentUser=data.user;currentUsername=username;
     showApp();
     await startOnlinePresence();await subscribeVoicePresence();await loadMessages();await subscribeMessages();
     toast("Hoş geldin, "+username+"!");
@@ -517,8 +481,6 @@ $("registered-login-btn").addEventListener("click",loginAccount);
 $("registered-password").addEventListener("keydown",e=>{if(e.key==="Enter")loginAccount();});
 $("register-password").addEventListener("keydown",e=>{if(e.key==="Enter")registerAccount();});
 
-$("login-btn").addEventListener("click",login);
-$("guest-name").addEventListener("keydown",event=>{if(event.key==="Enter") login();});
 $("send-btn").addEventListener("click",sendMessage);
 $("msg").addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();sendMessage();}});
 $("join-btn").addEventListener("click",joinVoice);

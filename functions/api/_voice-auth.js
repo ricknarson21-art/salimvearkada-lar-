@@ -19,7 +19,8 @@ export async function authenticateVoiceUser(request, env) {
   });
   if (!userResponse.ok) return Response.json({ error: "Invalid login" }, { status: 401 });
   const user = await userResponse.json();
-  if (!user.id) return Response.json({ error: "Invalid user" }, { status: 401 });
+  if (user?.is_anonymous === true) return Response.json({ error: "Kayıtlı hesap gerekli" }, { status: 401 });
+  if (!user?.id) return Response.json({ error: "Invalid user" }, { status: 401 });
   const secret = env.SUPABASE_SECRET_KEY?.trim();
   if (!secret) return Response.json({ error: "Ban kontrolü yapılandırılmamış" }, { status: 503 });
   const banResponse = await fetch(

@@ -82,7 +82,7 @@ async function identify(request, env) {
   });
   if (!res.ok) return null;
   const user = await res.json().catch(() => null);
-  return user && UUID.test(user.id) ? user : null;
+  return user && user.is_anonymous !== true && UUID.test(user.id) ? user : null;
 }
 async function roleOf(secret, userId) {
   const result = await dbCall(secret,"account_roles",`?select=role&user_id=eq.${encodeURIComponent(userId)}&limit=1`);
