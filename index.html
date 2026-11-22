@@ -315,12 +315,22 @@ try{
   }
 }catch(error){console.warn("Ses tercihleri yüklenemedi:",error);}
 function getFriendVolume(userId){return friendVolumes.get(userId)??100;}
+const remoteAudioPublications=new WeakMap();
+function applyVoicePlayback(audio,level){
+  audio.volume=level/100;
+  const silent=level===0 || remoteAudioPublications.get(audio)?.isMuted===true;
+  audio.muted=silent;
+  audio.autoplay=!silent;
+  if(silent) audio.pause();
+  else if(audio.paused) void audio.play().catch(()=>{});
+}
+
 function setFriendVolume(userId,value){
   if(!userId || userId===currentUser?.id) return;
   const level=Math.max(0,Math.min(100,Math.round(Number(value)||0)));
   friendVolumes.set(userId,level);
   const elements=remoteAudioByUser.get(userId);
-  if(elements){for(const audio of elements) audio.volume=level/100;}
+  if(elements){for(const audio of elements) applyVoicePlayback(audio,level);}
   try{localStorage.setItem(VOICE_VOLUME_STORAGE_KEY,JSON.stringify(Object.fromEntries(friendVolumes)));}
   catch(error){console.warn("Ses tercihi kaydedilemedi:",error);}
 }
@@ -1869,16 +1879,26 @@ async function joinVoice(){
     }
     room.on(LivekitClient.RoomEvent.TrackSubscribed,(track,publication,participant)=>{
       if(track.kind==="audio" && !isScreenShareAudio(publication)){
-        const audio=track.attach();audio.autoplay=true;
+        const audio=track.attach();
+        remoteAudioPublications.set(audio,publication);
         const userId=participant?.identity;
         if(userId){
-          audio.volume=getFriendVolume(userId)/100;
           if(!remoteAudioByUser.has(userId))remoteAudioByUser.set(userId,new Set());
           remoteAudioByUser.get(userId).add(audio);
         }
         remoteAudioElements.add(audio);document.body.appendChild(audio);
+        applyVoicePlayback(audio,userId ? getFriendVolume(userId) : 100);
       }
     });
+    for(const event of [LivekitClient.RoomEvent.TrackMuted,LivekitClient.RoomEvent.TrackUnmuted]){
+      room.on(event,(publication,participant)=>{
+        for(const audio of remoteAudioByUser.get(participant?.identity) ?? []){
+          if(remoteAudioPublications.get(audio)===publication){
+            applyVoicePlayback(audio,getFriendVolume(participant.identity));
+          }
+        }
+      });
+    }
     room.on(LivekitClient.RoomEvent.TrackUnsubscribed,(track,publication,participant)=>{
       if(isScreenShareAudio(publication) || track.kind==="video") return;
       track.detach().forEach(element=>{
