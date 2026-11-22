@@ -179,6 +179,11 @@
             <label>Mikrofon <select id="audio-input"></select></label>
             <label>Sesli sohbet çıkışı <select id="audio-output"></select></label>
           </div>
+          <div class="voice-settings">
+            <label><input id="audio-disable-agc" type="checkbox"> Otomatik kazancı kapat</label>
+            <label><input id="audio-disable-ns" type="checkbox"> Gürültü bastırmayı kapat</label>
+          </div>
+          <p class="statusline">Cızırtıyı test etmek için bir ayarı değiştirip ses odasına yeniden katıl.</p>
           <button id="audio-enable" type="button" class="muted-btn">Cihazları göster</button>
           <p id="audio-device-status" class="statusline" role="status"></p>
         </details>
@@ -1596,7 +1601,11 @@ function selectedAudioDevice(kind){
 
 function selectedMicrophoneOptions(){
   const id=selectedAudioDevice("audioinput");
-  return id==="default" ? undefined : {deviceId:{ideal:id}};
+  return {
+    ...(id==="default" ? {} : {deviceId:{ideal:id}}),
+    ...($("audio-disable-agc").checked ? {autoGainControl:false} : {}),
+    ...($("audio-disable-ns").checked ? {noiseSuppression:false} : {})
+  };
 }
 
 function renderAudioDeviceOptions(){
@@ -1817,7 +1826,7 @@ async function joinVoice(){
     });
     const result=await response.json();
     if(!response.ok) throw new Error(result.error||"Ses bağlantısı kurulamadı.");
-    room=new LivekitClient.Room();
+    room=new LivekitClient.Room({audioCaptureDefaults:selectedMicrophoneOptions()});
     const activeRoom=room;
     if(LivekitClient.RoomEvent.ParticipantPermissionsChanged){
       room.on(LivekitClient.RoomEvent.ParticipantPermissionsChanged,(_previous,participant)=>{
@@ -2238,6 +2247,14 @@ for(const [kind,{select}] of Object.entries(audioKinds)){
 $("audio-devices").addEventListener("toggle",()=>{
   if($("audio-devices").open) void refreshAudioDevices();
 });
+for(const id of ["audio-disable-agc","audio-disable-ns"]){
+  const checkbox=$(id);
+  checkbox.checked=localStorage.getItem("birartibir_"+id)==="1";
+  checkbox.addEventListener("change",()=>{
+    localStorage.setItem("birartibir_"+id,checkbox.checked?"1":"0");
+    if(livekitRoom) toast("Yeni ayar için ses odasına yeniden katıl.");
+  });
+}
 $("audio-enable").addEventListener("click",()=>void refreshAudioDevices(true));
 navigator.mediaDevices?.addEventListener?.("devicechange",()=>void refreshAudioDevices());
 renderAudioDeviceOptions();
